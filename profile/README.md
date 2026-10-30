@@ -19,6 +19,6 @@
 | [**planning**](https://github.com/aromapacifico-platform/planning) | Arquitectura, plan de 100 horas, costos, gestión del cambio, sistema de diseño y sustentación, con el tablero del proyecto |
 | [**iac**](https://github.com/aromapacifico-platform/iac) | Infraestructura como código en Terraform: módulos reutilizables y ambientes de desarrollo, pruebas y producción |
 
-El trabajo se sigue en el [tablero Kanban](https://github.com/orgs/aromapacifico-platform/projects/1).
+El trabajo se sigue en el [tablero Kanban](https://github.com/orgs/aromapacifico-platform/projects/2).
 
 <sub>Caso de estudio académico · Universidad Icesi</sub>
