@@ -40,12 +40,24 @@ jobs:
     name: 'Deploy to ${{ inputs.environment }}'
     runs-on: ubuntu-latest
     environment: ${{ inputs.environment }}
-    defaults:
-      run:
-        working-directory: ${{ inputs.working_directory }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: Resolve Environment Working Directory
+        id: target-dir
+        shell: bash
+        run: |
+          TARGET="${{ inputs.working_directory }}"
+          if [ -z "$TARGET" ] || [ ! -d "$TARGET" ]; then
+            if [ -d "iac/environments/${{ inputs.environment }}" ]; then
+              TARGET="iac/environments/${{ inputs.environment }}"
+            elif [ -d "environments/${{ inputs.environment }}" ]; then
+              TARGET="environments/${{ inputs.environment }}"
+            fi
+          fi
+          echo "[INFO] Resolved target working directory: $TARGET"
+          echo "path=${TARGET}" >> $GITHUB_OUTPUT
 
       - name: Setup Terraform CLI
         uses: ./.github/actions/setup-iac-tools
@@ -63,6 +75,7 @@ jobs:
           audience: sts.amazonaws.com
 
       - name: Terraform Init
+        working-directory: ${{ steps.target-dir.outputs.path }}
         shell: bash
         run: |
           echo "[INFO] Initializing Terraform for environment: ${{ inputs.environment }}"
@@ -70,6 +83,7 @@ jobs:
 
       - name: Terraform Plan
         id: plan
+        working-directory: ${{ steps.target-dir.outputs.path }}
         shell: bash
         run: |
           echo "[INFO] Running terraform plan..."
@@ -78,6 +92,7 @@ jobs:
 
       - name: Terraform Apply
         if: ${{ inputs.apply_changes }}
+        working-directory: ${{ steps.target-dir.outputs.path }}
         shell: bash
         run: |
           echo "[INFO] Applying infrastructure changes to environment: ${{ inputs.environment }}"

@@ -86,7 +86,11 @@ jobs:
             ARGS+=( "--emergency" )
           fi
 
-          python .github/scripts/check_harvest_window.py "${ARGS[@]}"
+          SCRIPT="scripts/check_harvest_window.py"
+          if [ ! -f "$SCRIPT" ] && [ -f ".github/scripts/check_harvest_window.py" ]; then
+            SCRIPT=".github/scripts/check_harvest_window.py"
+          fi
+          python "$SCRIPT" "${ARGS[@]}"
           echo "[SUCCESS] Harvest window gate passed. Proceeding to production promotion."
 
   deploy-prod:

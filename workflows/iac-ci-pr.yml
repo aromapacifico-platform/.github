@@ -43,13 +43,21 @@ jobs:
         shell: bash
         run: |
           echo "[INFO] Running terraform fmt check..."
-          terraform fmt -check -recursive iac/
+          TARGET="iac"
+          if [ ! -d "iac" ]; then
+            TARGET="."
+          fi
+          terraform fmt -check -recursive "$TARGET"
 
       - name: Validate Terraform configuration per environment
         shell: bash
         run: |
           set -e
-          TARGET_DIRS=("iac/bootstrap" "iac/environments/dev" "iac/environments/test" "iac/environments/prod")
+          PREFIX=""
+          if [ -d "iac" ]; then
+            PREFIX="iac/"
+          fi
+          TARGET_DIRS=("${PREFIX}bootstrap" "${PREFIX}environments/dev" "${PREFIX}environments/test" "${PREFIX}environments/prod")
           for dir in "${TARGET_DIRS[@]}"; do
             if [ -d "$dir" ]; then
               echo "[INFO] Validating syntax in $dir..."
@@ -61,17 +69,25 @@ jobs:
         shell: bash
         run: |
           echo "[INFO] Running TFLint inspection..."
-          tflint --recursive --config=iac/.tflint.hcl
+          CONFIG_FILE=".tflint.hcl"
+          if [ -f "iac/.tflint.hcl" ]; then
+            CONFIG_FILE="iac/.tflint.hcl"
+          fi
+          tflint --recursive --config="$CONFIG_FILE"
 
       - name: Run Trivy security and misconfiguration scan
         shell: bash
         run: |
           echo "[INFO] Scanning IaC configurations with Trivy..."
+          TARGET="iac"
+          if [ ! -d "iac" ]; then
+            TARGET="."
+          fi
           trivy config \
             --severity HIGH,CRITICAL \
             --exit-code 1 \
             --scanners misconfig \
-            iac/
+            "$TARGET"
 
   infracost-finops:
     name: 'FinOps Cloud Cost Estimation'
@@ -192,7 +208,11 @@ jobs:
         shell: bash
         run: |
           set -e
-          cd "iac/environments/${{ matrix.environment }}"
+          TARGET_DIR="iac/environments/${{ matrix.environment }}"
+          if [ ! -d "$TARGET_DIR" ] && [ -d "environments/${{ matrix.environment }}" ]; then
+            TARGET_DIR="environments/${{ matrix.environment }}"
+          fi
+          cd "$TARGET_DIR"
           
           if [ "${{ steps.aws-auth.outcome }}" == "success" ]; then
             echo "[INFO] Running terraform init with remote S3 backend..."
@@ -213,7 +233,10 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
             const fs = require('fs');
-            const path = `iac/environments/${{ matrix.environment }}/plan_output.txt`;
+            let path = `iac/environments/${{ matrix.environment }}/plan_output.txt`;
+            if (!fs.existsSync(path)) {
+              path = `environments/${{ matrix.environment }}/plan_output.txt`;
+            }
             let planText = 'Plan output not captured.';
             if (fs.existsSync(path)) {
               planText = fs.readFileSync(path, 'utf8');
