@@ -7,10 +7,16 @@ on:
         description: 'Target environment name (dev, test, prod).'
         required: true
         type: string
+      execution_mode:
+        description: 'Execution mode: plan-and-apply, plan, or apply.'
+        required: false
+        type: string
+        default: 'plan-and-apply'
       working_directory:
         description: 'Path to working directory containing Terraform configuration.'
-        required: true
+        required: false
         type: string
+        default: ''
       aws_role_arn:
         description: 'AWS IAM Role ARN assumed via GitHub Actions OIDC.'
         required: true
@@ -30,16 +36,26 @@ on:
         required: false
         type: boolean
         default: true
+      artifact_name:
+        description: 'Name of the immutable plan artifact.'
+        required: false
+        type: string
+        default: ''
+      artifact_retention_days:
+        description: 'Retention period in days for the plan artifact.'
+        required: false
+        type: number
+        default: 2
 
 permissions:
   id-token: write
   contents: read
 
 jobs:
-  terraform-deploy:
-    name: 'Deploy to ${{ inputs.environment }}'
+  plan:
+    name: 'Plan - ${{ inputs.environment }}'
+    if: inputs.execution_mode == 'plan-and-apply' || inputs.execution_mode == 'plan'
     runs-on: ubuntu-latest
-    environment: ${{ inputs.environment }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -81,20 +97,103 @@ jobs:
           echo "[INFO] Initializing Terraform for environment: ${{ inputs.environment }}"
           terraform init -backend-config=backend.hcl
 
-      - name: Terraform Plan
-        id: plan
+      - name: Generate Speculative Binary and Text Plan
+        id: generate-plan
         working-directory: ${{ steps.target-dir.outputs.path }}
         shell: bash
         run: |
-          echo "[INFO] Running terraform plan..."
+          echo "[INFO] Generating binary terraform plan (tfplan)..."
           terraform plan -no-color -out=tfplan
+          echo "[INFO] Emitting plain text plan output (tfplan.txt) for audit..."
           terraform show -no-color tfplan > tfplan.txt
 
-      - name: Terraform Apply
-        if: ${{ inputs.apply_changes }}
+      - name: Upload Immutable Plan Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ inputs.artifact_name != '' && inputs.artifact_name || format('tfplan-{0}', inputs.environment) }}
+          path: |
+            ${{ steps.target-dir.outputs.path }}/tfplan
+            ${{ steps.target-dir.outputs.path }}/tfplan.txt
+          retention-days: ${{ inputs.artifact_retention_days }}
+          if-no-files-found: error
+
+  apply:
+    name: 'Apply - ${{ inputs.environment }}'
+    needs: [plan]
+    if: |
+      always() &&
+      (inputs.execution_mode == 'apply' || needs.plan.result == 'success') &&
+      inputs.apply_changes == true
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Resolve Environment Working Directory
+        id: target-dir
+        shell: bash
+        run: |
+          TARGET="${{ inputs.working_directory }}"
+          if [ -z "$TARGET" ] || [ ! -d "$TARGET" ]; then
+            if [ -d "iac/environments/${{ inputs.environment }}" ]; then
+              TARGET="iac/environments/${{ inputs.environment }}"
+            elif [ -d "environments/${{ inputs.environment }}" ]; then
+              TARGET="environments/${{ inputs.environment }}"
+            fi
+          fi
+          echo "[INFO] Resolved target working directory: $TARGET"
+          echo "path=${TARGET}" >> $GITHUB_OUTPUT
+
+      - name: Setup Terraform CLI
+        uses: ./.github/actions/setup-iac-tools
+        with:
+          terraform-version: ${{ inputs.terraform_version }}
+          install-tflint: 'false'
+          install-trivy: 'false'
+          install-infracost: 'false'
+
+      - name: Authenticate to AWS via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ inputs.aws_role_arn }}
+          aws-region: ${{ inputs.aws_region }}
+          audience: sts.amazonaws.com
+
+      - name: Download Immutable Plan Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.artifact_name != '' && inputs.artifact_name || format('tfplan-{0}', inputs.environment) }}
+          path: ${{ steps.target-dir.outputs.path }}
+
+      - name: Verify Plan Integrity and Working Directory
         working-directory: ${{ steps.target-dir.outputs.path }}
         shell: bash
         run: |
-          echo "[INFO] Applying infrastructure changes to environment: ${{ inputs.environment }}"
-          terraform apply -no-color -auto-approve tfplan
+          if [ ! -f "tfplan" ]; then
+            echo "[INFO] Searching for tfplan in workspace..."
+            FOUND=$(find "${{ github.workspace }}" -name "tfplan" -type f | head -n 1)
+            if [ -n "$FOUND" ] && [ -f "$FOUND" ]; then
+              echo "[INFO] Copying plan artifact from $FOUND to working directory..."
+              cp "$FOUND" ./tfplan
+            else
+              echo "[ERROR] Immutable plan artifact 'tfplan' not found!"
+              exit 1
+            fi
+          fi
+          echo "[INFO] Immutable plan artifact verified:"
+          ls -la tfplan
 
+      - name: Terraform Init
+        working-directory: ${{ steps.target-dir.outputs.path }}
+        shell: bash
+        run: |
+          echo "[INFO] Initializing Terraform backend for apply: ${{ inputs.environment }}"
+          terraform init -backend-config=backend.hcl
+
+      - name: Terraform Apply Immutable Plan
+        working-directory: ${{ steps.target-dir.outputs.path }}
+        shell: bash
+        run: |
+          echo "[INFO] Applying verified immutable plan to environment: ${{ inputs.environment }}"
+          terraform apply -no-color -auto-approve tfplan
