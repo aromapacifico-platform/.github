@@ -1,0 +1,2 @@
+# Test dependencies for Coffee Harvest Window Gatekeeper
+pytest>=8.0.0
