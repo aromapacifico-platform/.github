@@ -29,7 +29,7 @@ concurrency:
 jobs:
   detect-drift:
     name: 'Audit Drift - ${{ matrix.environment }}'
-    if: inputs.target_environment == 'all' || inputs.target_environment == matrix.environment || github.event_name == 'schedule'
+    if: github.event_name == 'schedule' || inputs.target_environment == 'all' || inputs.target_environment == matrix.environment
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -45,6 +45,7 @@ jobs:
           terraform-version: '1.10.5'
           install-tflint: 'false'
           install-trivy: 'false'
+          install-infracost: 'false'
 
       - name: Resolve OIDC Role ARN for Environment
         id: resolve-role
@@ -157,3 +158,4 @@ ${diffContent}
               body: body,
               labels: ['drift', 'infrastructure', 'security-audit']
             });
+

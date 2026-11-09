@@ -66,9 +66,9 @@ jobs:
         id: gatekeeper
         shell: bash
         env:
-          EMERGENCY_INPUT: ${{ inputs.emergency_override }}
-          BYPASS_REASON_INPUT: ${{ inputs.bypass_reason }}
-          COMMIT_MSG: ${{ github.event.head_commit.message }}
+          EMERGENCY_INPUT: ${{ inputs.emergency_override || false }}
+          BYPASS_REASON_INPUT: ${{ inputs.bypass_reason || '' }}
+          COMMIT_MSG: ${{ github.event.head_commit.message || '' }}
         run: |
           echo "[INFO] Evaluating harvest window restriction for production deployment..."
           
@@ -98,3 +98,4 @@ jobs:
       working_directory: iac/environments/prod
       aws_role_arn: ${{ vars.AWS_ROLE_ARN_PROD || 'arn:aws:iam::333333333333:role/aromapacifico-ci-prod' }}
       apply_changes: true
+

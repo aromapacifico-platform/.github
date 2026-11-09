@@ -53,6 +53,7 @@ jobs:
           terraform-version: ${{ inputs.terraform_version }}
           install-tflint: 'false'
           install-trivy: 'false'
+          install-infracost: 'false'
 
       - name: Authenticate to AWS via OIDC
         uses: aws-actions/configure-aws-credentials@v4
@@ -81,3 +82,4 @@ jobs:
         run: |
           echo "[INFO] Applying infrastructure changes to environment: ${{ inputs.environment }}"
           terraform apply -no-color -auto-approve tfplan
+
