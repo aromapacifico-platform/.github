@@ -8,12 +8,15 @@ on:
       - 'iac/**'
       - '.github/workflows/iac-ci-pr.yml'
       - '.github/actions/setup-iac-tools/**'
+      - 'infracost.yml'
+      - '.github/infracost.yml'
   workflow_dispatch:
 
 permissions:
   id-token: write
   contents: read
   pull-requests: write
+  issues: write
 
 concurrency:
   group: iac-ci-pr-${{ github.head_ref || github.run_id }}
@@ -27,12 +30,13 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Setup IaC Tools (Terraform, TFLint, Trivy)
+      - name: Setup IaC Tools (Terraform, TFLint, Trivy, Infracost)
         uses: ./.github/actions/setup-iac-tools
         with:
           terraform-version: '1.10.5'
           tflint-version: 'v0.55.0'
           trivy-version: 'v0.58.2'
+          install-infracost: 'false'
           tflint-config-path: 'iac/.tflint.hcl'
 
       - name: Check Terraform formatting
@@ -69,6 +73,66 @@ jobs:
             --scanners misconfig \
             iac/
 
+  infracost-finops:
+    name: 'FinOps Cloud Cost Estimation'
+    needs: quality-and-security
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Infracost CLI
+        uses: infracost/actions/setup@v3
+        with:
+          api-key: ${{ secrets.INFRACOST_API_KEY }}
+
+      - name: Generate Infracost Baseline and Diff
+        id: infracost-diff
+        shell: bash
+        env:
+          INFRACOST_API_KEY: ${{ secrets.INFRACOST_API_KEY }}
+        run: |
+          CONFIG_FILE="infracost.yml"
+          if [ ! -f "$CONFIG_FILE" ] && [ -f ".github/infracost.yml" ]; then
+            CONFIG_FILE=".github/infracost.yml"
+          fi
+
+          if [ -z "$INFRACOST_API_KEY" ]; then
+            echo "[WARN] INFRACOST_API_KEY is not configured in repository secrets."
+            echo "[WARN] Skipping FinOps cost diff comment. Please add INFRACOST_API_KEY secret to enable cost estimation."
+            echo "skipped=true" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          echo "[INFO] Generating baseline cost from base branch using $CONFIG_FILE..."
+          git checkout "${{ github.event.pull_request.base.ref || 'main' }}"
+          infracost breakdown --config-file="$CONFIG_FILE" --format=json --out-file=/tmp/infracost-base.json || true
+
+          echo "[INFO] Generating cost diff for pull request branch..."
+          git checkout "${{ github.event.pull_request.head.sha || github.sha }}"
+          infracost diff --config-file="$CONFIG_FILE" \
+            --format=json \
+            --compare-to=/tmp/infracost-base.json \
+            --out-file=/tmp/infracost.json
+
+          echo "skipped=false" >> $GITHUB_OUTPUT
+
+      - name: Post Infracost Comment to Pull Request
+        if: github.event_name == 'pull_request' && steps.infracost-diff.outputs.skipped != 'true'
+        shell: bash
+        run: |
+          if [ -f /tmp/infracost.json ]; then
+            echo "[INFO] Publishing Infracost cost estimation comment to Pull Request..."
+            infracost comment github \
+              --path=/tmp/infracost.json \
+              --repo=${{ github.repository }} \
+              --github-token=${{ secrets.GITHUB_TOKEN }} \
+              --pull-request=${{ github.event.pull_request.number }} \
+              --behavior=update
+          fi
+
   speculative-plan:
     name: 'Speculative Plan - ${{ matrix.environment }}'
     needs: quality-and-security
@@ -87,6 +151,7 @@ jobs:
           terraform-version: '1.10.5'
           install-tflint: 'false'
           install-trivy: 'false'
+          install-infracost: 'false'
 
       - name: Resolve OIDC Role ARN for Environment
         id: resolve-role
