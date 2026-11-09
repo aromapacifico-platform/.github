@@ -86,3 +86,4 @@ pytest
 # Verify zero-emoji compliance
 python -c "import os, unicodedata; ..."
 ```
+

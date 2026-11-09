@@ -80,3 +80,4 @@ The test suite covers:
 - Timezone translations (`UTC-5` offset, `America/Bogota` localization).
 - All emergency bypass channels (CLI, environment, labels, event JSON).
 - Standard output, JSON generation, and GitHub Actions `GITHUB_OUTPUT` file writing.
+

@@ -46,3 +46,4 @@
 - [ ] Manual push policy observed (changes reviewed before pushing)
 - [ ] No secrets, credentials, or private keys committed
 - [ ] Documentation matches current project layout
+

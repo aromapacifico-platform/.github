@@ -42,3 +42,4 @@ steps:
       install-infracost: 'true'
       infracost-api-key: ${{ secrets.INFRACOST_API_KEY }}
 ```
+
