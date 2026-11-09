@@ -45,9 +45,9 @@ This repository (`aromapacifico-platform/.github`) serves as the central automat
 | Workflow | Trigger | Scope & Actions |
 |---|---|---|
 | `ci-scripts.yml` | Push & PR on `scripts/**`, `pytest.ini` | Executes pytest across Python matrix (3.11, 3.12) and audits zero emojis |
-| `iac-ci-pr.yml` | PR against `main` affecting `iac/**` | Validates syntax, format, TFLint AWS rules, Trivy scan, Infracost diff, and OIDC speculative plans |
-| `iac-cd-platform.yml` | Push to `main` affecting `iac/**` | Sequential promotion `dev` -> `test` -> Harvest Window Gate -> `prod` (manual approval required) |
-| `iac-reusable-tf-pipeline.yml` | `workflow_call` | Modular execution of Terraform `init`, `plan`, and `apply` for a target environment |
+| `iac-ci-pr.yml` | PR against `main` affecting `iac/**` | Validates syntax, format, TFLint AWS rules, Trivy scan, Infracost diff, and strict OIDC speculative plans |
+| `iac-cd-platform.yml` | Push to `main` affecting `iac/**` | Sequential promotion `dev` -> `test` -> Harvest Window Gate (with PR label API lookup) -> `plan-prod` -> `apply-prod` (manual approval) |
+| `iac-reusable-tf-pipeline.yml` | `workflow_call` | Decoupled execution: generates `tfplan` binary, uploads immutable artifact, downloads and applies without discrepancy |
 | `iac-drift-detection.yml` | Schedule (`07:00 UTC` / `02:00 COT`) | Non-destructive drift audit across `dev`, `test`, `prod` using `plan -detailed-exitcode` |
 
 ---

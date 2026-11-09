@@ -203,6 +203,30 @@ jobs:
           aws-region: us-east-1
           audience: sts.amazonaws.com
 
+      - name: Enforce Strict OIDC Authentication Policy
+        id: verify-auth
+        shell: bash
+        env:
+          AUTH_OUTCOME: ${{ steps.aws-auth.outcome }}
+          IS_FORK: ${{ github.event.pull_request.head.repo.fork }}
+          EVENT_NAME: ${{ github.event_name }}
+          REPO_NAME: ${{ github.repository }}
+        run: |
+          echo "[INFO] Event: $EVENT_NAME | Repository: $REPO_NAME | Is Fork: $IS_FORK | OIDC Outcome: $AUTH_OUTCOME"
+          
+          # Internal branches of the official repository must have successful OIDC authentication
+          if [ "$IS_FORK" != "true" ]; then
+            if [ "$AUTH_OUTCOME" != "success" ]; then
+              echo "[ERROR] AWS OIDC authentication failed for internal branch in $REPO_NAME."
+              echo "[ERROR] Refusing to proceed with speculative plan as a silent false-positive."
+              echo "[ERROR] Verify that the IAM Role '${{ steps.resolve-role.outputs.role_arn }}' exists, trusts $REPO_NAME, and is accessible."
+              exit 1
+            fi
+            echo "[SUCCESS] AWS OIDC authentication validated successfully for internal branch."
+          else
+            echo "[WARN] Pull Request originates from an external fork ($IS_FORK). Skipping live cloud state access."
+          fi
+
       - name: Execute Terraform Speculative Plan
         id: tf-plan
         shell: bash
