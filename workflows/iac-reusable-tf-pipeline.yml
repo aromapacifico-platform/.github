@@ -1,0 +1,83 @@
+name: 'Reusable Terraform Pipeline'
+
+on:
+  workflow_call:
+    inputs:
+      environment:
+        description: 'Target environment name (dev, test, prod).'
+        required: true
+        type: string
+      working_directory:
+        description: 'Path to working directory containing Terraform configuration.'
+        required: true
+        type: string
+      aws_role_arn:
+        description: 'AWS IAM Role ARN assumed via GitHub Actions OIDC.'
+        required: true
+        type: string
+      aws_region:
+        description: 'AWS target region.'
+        required: false
+        type: string
+        default: 'us-east-1'
+      terraform_version:
+        description: 'Version of Terraform CLI.'
+        required: false
+        type: string
+        default: '1.10.5'
+      apply_changes:
+        description: 'Whether to execute terraform apply after plan.'
+        required: false
+        type: boolean
+        default: true
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  terraform-deploy:
+    name: 'Deploy to ${{ inputs.environment }}'
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    defaults:
+      run:
+        working-directory: ${{ inputs.working_directory }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform CLI
+        uses: ./.github/actions/setup-iac-tools
+        with:
+          terraform-version: ${{ inputs.terraform_version }}
+          install-tflint: 'false'
+          install-trivy: 'false'
+
+      - name: Authenticate to AWS via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ inputs.aws_role_arn }}
+          aws-region: ${{ inputs.aws_region }}
+          audience: sts.amazonaws.com
+
+      - name: Terraform Init
+        shell: bash
+        run: |
+          echo "[INFO] Initializing Terraform for environment: ${{ inputs.environment }}"
+          terraform init -backend-config=backend.hcl
+
+      - name: Terraform Plan
+        id: plan
+        shell: bash
+        run: |
+          echo "[INFO] Running terraform plan..."
+          terraform plan -no-color -out=tfplan
+          terraform show -no-color tfplan > tfplan.txt
+
+      - name: Terraform Apply
+        if: ${{ inputs.apply_changes }}
+        shell: bash
+        run: |
+          echo "[INFO] Applying infrastructure changes to environment: ${{ inputs.environment }}"
+          terraform apply -no-color -auto-approve tfplan

@@ -1,0 +1,100 @@
+name: 'IaC Continuous Delivery (Platform)'
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'iac/**'
+      - '.github/workflows/iac-cd-platform.yml'
+      - '.github/workflows/iac-reusable-tf-pipeline.yml'
+  workflow_dispatch:
+    inputs:
+      emergency_override:
+        description: 'Authorize emergency deployment bypass during harvest freeze window.'
+        required: false
+        type: boolean
+        default: false
+      bypass_reason:
+        description: 'Incident or change ticket justification for emergency bypass.'
+        required: false
+        type: string
+        default: ''
+
+permissions:
+  id-token: write
+  contents: read
+
+concurrency:
+  group: iac-cd-platform-deployment
+  cancel-in-progress: false
+
+jobs:
+  deploy-dev:
+    name: 'Promote to Dev'
+    uses: ./.github/workflows/iac-reusable-tf-pipeline.yml
+    with:
+      environment: dev
+      working_directory: iac/environments/dev
+      aws_role_arn: ${{ vars.AWS_ROLE_ARN_DEV || 'arn:aws:iam::111111111111:role/aromapacifico-ci-dev' }}
+      apply_changes: true
+
+  deploy-test:
+    name: 'Promote to Test'
+    needs: deploy-dev
+    uses: ./.github/workflows/iac-reusable-tf-pipeline.yml
+    with:
+      environment: test
+      working_directory: iac/environments/test
+      aws_role_arn: ${{ vars.AWS_ROLE_ARN_TEST || 'arn:aws:iam::222222222222:role/aromapacifico-ci-test' }}
+      apply_changes: true
+
+  harvest-window-gate:
+    name: 'Evaluate Production Harvest Window'
+    needs: deploy-test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Enforce Harvest Freeze Window Gate (05:00 - 18:00 UTC-5)
+        id: gatekeeper
+        shell: bash
+        env:
+          EMERGENCY_INPUT: ${{ inputs.emergency_override }}
+          BYPASS_REASON_INPUT: ${{ inputs.bypass_reason }}
+          COMMIT_MSG: ${{ github.event.head_commit.message }}
+        run: |
+          echo "[INFO] Evaluating harvest window restriction for production deployment..."
+          
+          ARGS=()
+          if [ "$EMERGENCY_INPUT" = "true" ]; then
+            echo "[WARN] Emergency override requested via workflow dispatch."
+            echo "[INFO] Justification: ${BYPASS_REASON_INPUT}"
+            ARGS+=( "--emergency" )
+          fi
+          
+          # Inspect commit message for emergency/incident indicators
+          LOWER_MSG=$(echo "$COMMIT_MSG" | tr '[:upper:]' '[:lower:]')
+          if [[ "$LOWER_MSG" =~ (emergency|incident|hotfix|override) ]]; then
+            echo "[INFO] Detected incident/hotfix marker in commit message. Authorizing bypass."
+            ARGS+=( "--emergency" )
+          fi
+
+          python .github/scripts/check_harvest_window.py "${ARGS[@]}"
+          echo "[SUCCESS] Harvest window gate passed. Proceeding to production promotion."
+
+  deploy-prod:
+    name: 'Promote to Production'
+    needs: harvest-window-gate
+    uses: ./.github/workflows/iac-reusable-tf-pipeline.yml
+    with:
+      environment: prod
+      working_directory: iac/environments/prod
+      aws_role_arn: ${{ vars.AWS_ROLE_ARN_PROD || 'arn:aws:iam::333333333333:role/aromapacifico-ci-prod' }}
+      apply_changes: true
