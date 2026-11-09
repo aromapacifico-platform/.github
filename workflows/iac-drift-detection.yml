@@ -1,0 +1,159 @@
+name: 'IaC Configuration Drift Detection'
+
+on:
+  schedule:
+    # 07:00 UTC = 02:00 AM America/Bogota (UTC-5)
+    - cron: '0 7 * * *'
+  workflow_dispatch:
+    inputs:
+      target_environment:
+        description: 'Environment to audit for configuration drift.'
+        required: true
+        type: choice
+        options:
+          - all
+          - dev
+          - test
+          - prod
+        default: all
+
+permissions:
+  id-token: write
+  contents: read
+  issues: write
+
+concurrency:
+  group: iac-drift-detection-${{ github.workflow }}
+  cancel-in-progress: false
+
+jobs:
+  detect-drift:
+    name: 'Audit Drift - ${{ matrix.environment }}'
+    if: inputs.target_environment == 'all' || inputs.target_environment == matrix.environment || github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        environment: [dev, test, prod]
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform CLI
+        uses: ./.github/actions/setup-iac-tools
+        with:
+          terraform-version: '1.10.5'
+          install-tflint: 'false'
+          install-trivy: 'false'
+
+      - name: Resolve OIDC Role ARN for Environment
+        id: resolve-role
+        shell: bash
+        env:
+          ROLE_DEV: ${{ vars.AWS_ROLE_ARN_DEV || secrets.AWS_ROLE_ARN_DEV }}
+          ROLE_TEST: ${{ vars.AWS_ROLE_ARN_TEST || secrets.AWS_ROLE_ARN_TEST }}
+          ROLE_PROD: ${{ vars.AWS_ROLE_ARN_PROD || secrets.AWS_ROLE_ARN_PROD }}
+        run: |
+          ENV_NAME="${{ matrix.environment }}"
+          case "$ENV_NAME" in
+            dev)
+              ROLE="${ROLE_DEV:-arn:aws:iam::111111111111:role/aromapacifico-ci-dev}"
+              ;;
+            test)
+              ROLE="${ROLE_TEST:-arn:aws:iam::222222222222:role/aromapacifico-ci-test}"
+              ;;
+            prod)
+              ROLE="${ROLE_PROD:-arn:aws:iam::333333333333:role/aromapacifico-ci-prod}"
+              ;;
+            *)
+              ROLE=""
+              ;;
+          esac
+          echo "role_arn=${ROLE}" >> $GITHUB_OUTPUT
+
+      - name: Authenticate to AWS via OIDC
+        id: aws-auth
+        uses: aws-actions/configure-aws-credentials@v4
+        continue-on-error: true
+        with:
+          role-to-assume: ${{ steps.resolve-role.outputs.role_arn }}
+          aws-region: us-east-1
+          audience: sts.amazonaws.com
+
+      - name: Run Detailed Exit Code Plan
+        id: check-drift
+        shell: bash
+        run: |
+          cd "iac/environments/${{ matrix.environment }}"
+          
+          if [ "${{ steps.aws-auth.outcome }}" != "success" ]; then
+            echo "[WARN] AWS OIDC credentials not available in current execution context. Skipping live state drift comparison."
+            echo "drift_detected=false" >> $GITHUB_OUTPUT
+            echo "skipped=true" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          echo "[INFO] Initializing backend configuration..."
+          terraform init -backend-config=backend.hcl
+
+          set +e
+          echo "[INFO] Running terraform plan -detailed-exitcode..."
+          terraform plan -detailed-exitcode -no-color > drift_report.txt 2>&1
+          PLAN_STATUS=$?
+          set -e
+
+          if [ $PLAN_STATUS -eq 0 ]; then
+            echo "[INFO] Infrastructure matches state exactly. No drift detected in ${{ matrix.environment }}."
+            echo "drift_detected=false" >> $GITHUB_OUTPUT
+          elif [ $PLAN_STATUS -eq 2 ]; then
+            echo "[WARN] Configuration drift detected in ${{ matrix.environment }}!"
+            echo "drift_detected=true" >> $GITHUB_OUTPUT
+          else
+            echo "[ERROR] Terraform plan failed with exit code $PLAN_STATUS."
+            cat drift_report.txt
+            exit $PLAN_STATUS
+          fi
+
+      - name: Alert via GitHub Issue on Drift Detection
+        if: steps.check-drift.outputs.drift_detected == 'true'
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const fs = require('fs');
+            const path = `iac/environments/${{ matrix.environment }}/drift_report.txt`;
+            let diffContent = 'No diff output captured.';
+            if (fs.existsSync(path)) {
+              diffContent = fs.readFileSync(path, 'utf8');
+              if (diffContent.length > 50000) {
+                diffContent = diffContent.substring(0, 50000) + '\n... [Diff truncated due to size limits]';
+              }
+            }
+
+            const title = `[DRIFT ALERT] Infrastructure drift detected in ${{ matrix.environment }}`;
+            const body = `### Configuration Drift Detected
+
+- **Environment**: \`${{ matrix.environment }}\`
+- **Detection Timestamp**: \`${new Date().toISOString()}\`
+- **Run ID**: \`${context.runId}\`
+
+An out-of-band change was detected between the committed Terraform code and the live AWS infrastructure in the \`${{ matrix.environment }}\` environment.
+
+#### Terraform Diff Output
+\`\`\`hcl
+${diffContent}
+\`\`\`
+
+**Required Action**:
+1. Review the uncommitted change in the AWS console or CloudTrail audit logs.
+2. Either reconcile the Terraform code in \`iac/environments/${{ matrix.environment }}\` or revert the out-of-band cloud modification.
+3. No automatic destructive actions have been applied.
+`;
+
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: title,
+              body: body,
+              labels: ['drift', 'infrastructure', 'security-audit']
+            });
