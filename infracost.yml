@@ -15,3 +15,4 @@ projects:
     name: prod
     terraform_vars:
       environment: prod
+
