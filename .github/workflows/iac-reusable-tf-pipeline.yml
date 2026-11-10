@@ -123,7 +123,7 @@ jobs:
     if: |
       always() &&
       (inputs.apply_changes == true) &&
-      (inputs.execution_mode == 'plan-and-apply' ? needs.plan.result == 'success' : inputs.execution_mode == 'apply')
+      ((inputs.execution_mode == 'plan-and-apply' && needs.plan.result == 'success') || inputs.execution_mode == 'apply')
     runs-on: ubuntu-latest
     environment: ${{ inputs.environment }}
     steps:
