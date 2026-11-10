@@ -86,7 +86,7 @@ runs:
 
     - name: Setup Trivy vulnerability scanner
       if: inputs.install-trivy == 'true'
-      uses: aquasecurity/setup-trivy@v0.2.2
+      uses: aquasecurity/setup-trivy@v0.2.6
       with:
         version: ${{ inputs.trivy-version }}
         cache: true
