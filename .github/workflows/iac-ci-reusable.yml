@@ -340,7 +340,6 @@ jobs:
         id: aws-auth
         if: steps.resolve-role.outputs.role_arn != ''
         uses: aws-actions/configure-aws-credentials@v4
-        continue-on-error: true
         with:
           role-to-assume: ${{ steps.resolve-role.outputs.role_arn }}
           aws-region: us-east-1
@@ -351,28 +350,34 @@ jobs:
         shell: bash
         run: |
           TARGET_DIR="environments/${{ matrix.environment }}"
-          if [ ! -d "$TARGET_DIR" ] && [ -d "iac/environments/${{ matrix.environment }}" ]; then
-            TARGET_DIR="iac/environments/${{ matrix.environment }}"
+          if [ ! -d "$TARGET_DIR" ]; then
+            echo "::error::Environment directory $TARGET_DIR not found."
+            exit 1
           fi
-          if [ -d "$TARGET_DIR" ]; then
-            cd "$TARGET_DIR"
-            if [ "${{ steps.aws-auth.outcome }}" == "success" ]; then
-              echo "[INFO] Running terraform init with remote S3 backend..."
-              if terraform init -backend-config=backend.hcl; then
-                echo "[INFO] Generating speculative terraform plan against remote state..."
-                terraform plan -no-color -lock=false -out=tfplan || true
-                terraform show -no-color tfplan > plan_output.txt 2>&1 || terraform plan -no-color -lock=false > plan_output.txt 2>&1
-              else
-                echo "[WARN] Remote backend bucket not yet provisioned in AWS. Falling back to local speculative plan with authenticated AWS provider..."
-                terraform init -backend=false
-                terraform plan -no-color -lock=false > plan_output.txt 2>&1 || echo "Speculative plan generated with authenticated AWS OIDC session." > plan_output.txt
-              fi
-            else
-              echo "[INFO] Initializing without backend (Static validation mode)..."
-              terraform init -backend=false
-              echo "Static syntax validation completed. Remote state inspection requires configured AWS OIDC credentials." > plan_output.txt
-            fi
+          if [ "${{ steps.aws-auth.outcome }}" != "success" ]; then
+            echo "::error::No OIDC role configured for ${{ matrix.environment }}; a plan needs AWS credentials."
+            exit 1
           fi
+          cd "$TARGET_DIR"
+          if terraform init -input=false -backend-config=backend.hcl; then
+            echo "[INFO] Planning against the remote S3 state."
+          else
+            # Academic scope: the team only plans, it never applies. Without a
+            # state bucket the plan runs with a temporary local state; nothing
+            # is created in AWS.
+            echo "[INFO] No remote state bucket. Planning with a temporary local state."
+            printf 'terraform {\n  backend "local" {}\n}\n' > backend_override.tf
+            terraform init -input=false -reconfigure
+          fi
+          terraform plan -input=false -no-color -lock=false -out=tfplan
+          terraform show -no-color tfplan > plan_output.txt
+
+      - name: Upload plan output
+        uses: actions/upload-artifact@v4
+        with:
+          name: plan-${{ matrix.environment }}
+          path: environments/${{ matrix.environment }}/plan_output.txt
+          retention-days: 30
 
       - name: Post Plan Summary to Pull Request
         if: github.event_name == 'pull_request'
