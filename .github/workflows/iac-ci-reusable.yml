@@ -116,7 +116,7 @@ jobs:
         shell: bash
         run: |
           echo "[INFO] Running TFLint on ${{ matrix.module }}..."
-          CONFIG_PATH="../../.tflint.hcl"
+          CONFIG_PATH="$GITHUB_WORKSPACE/.tflint.hcl"
           if [ -f "$CONFIG_PATH" ]; then
             tflint --recursive --config="$CONFIG_PATH"
           else
