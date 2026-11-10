@@ -31,32 +31,32 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  deploy-dev:
-    name: 'Promote to Dev'
+  plan-dev:
+    name: 'Plan - Development'
     uses: ./.github/workflows/iac-reusable-tf-pipeline.yml
     with:
       environment: dev
-      execution_mode: 'plan-and-apply'
+      execution_mode: 'plan'
       working_directory: iac/environments/dev
       aws_role_arn: ${{ vars.AWS_ROLE_ARN_DEV || 'arn:aws:iam::111111111111:role/aromapacifico-ci-dev' }}
-      apply_changes: true
+      apply_changes: false
       artifact_name: 'tfplan-dev'
 
-  deploy-test:
-    name: 'Promote to Test'
-    needs: deploy-dev
+  plan-test:
+    name: 'Plan - Testing'
+    needs: plan-dev
     uses: ./.github/workflows/iac-reusable-tf-pipeline.yml
     with:
       environment: test
-      execution_mode: 'plan-and-apply'
+      execution_mode: 'plan'
       working_directory: iac/environments/test
       aws_role_arn: ${{ vars.AWS_ROLE_ARN_TEST || 'arn:aws:iam::222222222222:role/aromapacifico-ci-test' }}
-      apply_changes: true
+      apply_changes: false
       artifact_name: 'tfplan-test'
 
   harvest-window-gate:
     name: 'Evaluate Production Harvest Window'
-    needs: deploy-test
+    needs: plan-test
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -166,16 +166,4 @@ jobs:
       working_directory: iac/environments/prod
       aws_role_arn: ${{ vars.AWS_ROLE_ARN_PROD || 'arn:aws:iam::333333333333:role/aromapacifico-ci-prod' }}
       apply_changes: false
-      artifact_name: 'tfplan-prod'
-
-  apply-prod:
-    name: 'Promote to Production'
-    needs: plan-prod
-    uses: ./.github/workflows/iac-reusable-tf-pipeline.yml
-    with:
-      environment: prod
-      execution_mode: 'apply'
-      working_directory: iac/environments/prod
-      aws_role_arn: ${{ vars.AWS_ROLE_ARN_PROD || 'arn:aws:iam::333333333333:role/aromapacifico-ci-prod' }}
-      apply_changes: true
       artifact_name: 'tfplan-prod'

@@ -8,10 +8,10 @@ on:
         required: true
         type: string
       execution_mode:
-        description: 'Execution mode: plan-and-apply, plan, or apply.'
+        description: 'Execution mode: plan only (apply is prohibited per project scope).'
         required: false
         type: string
-        default: 'plan-and-apply'
+        default: 'plan'
       working_directory:
         description: 'Path to working directory containing Terraform configuration.'
         required: false
@@ -32,10 +32,10 @@ on:
         type: string
         default: '1.10.5'
       apply_changes:
-        description: 'Whether to execute terraform apply after plan.'
+        description: 'Apply is strictly prohibited. Kept false for backward compatibility.'
         required: false
         type: boolean
-        default: true
+        default: false
       artifact_name:
         description: 'Name of the immutable plan artifact.'
         required: false
@@ -120,10 +120,8 @@ jobs:
   apply:
     name: 'Apply - ${{ inputs.environment }}'
     needs: [plan]
-    if: |
-      always() &&
-      (inputs.execution_mode == 'apply' || needs.plan.result == 'success') &&
-      inputs.apply_changes == true
+    # STRICTLY PROHIBITED PER PROJECT SCOPE: terraform apply is blocked. Scope is validate and plan only.
+    if: false
     runs-on: ubuntu-latest
     environment: ${{ inputs.environment }}
     steps:
