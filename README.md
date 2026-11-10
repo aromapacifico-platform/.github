@@ -27,15 +27,17 @@ This repository (`aromapacifico-platform/.github`) serves as the central automat
 |   `-- README.md               # Organization public profile page
 |-- scripts/
 |   |-- check_harvest_window.py # Production harvest freeze gatekeeper (05:00-18:00 UTC-5)
+|   |-- detect_changed_targets.py # Dynamic target detection for changed modules and environments
 |   |-- test_harvest_window.py  # Comprehensive test suite (49 pytest test cases)
 |   |-- requirements-test.txt   # Test dependencies
 |   `-- README.md               # Technical script documentation and CLI guide
-`-- workflows/
-    |-- ci-scripts.yml          # Automated CI for Python scripts and zero-emoji audits
-    |-- iac-ci-pr.yml           # IaC Pull Request validation (fmt, validate, lint, Trivy, Infracost, plan)
-    |-- iac-cd-platform.yml     # Multi-environment CD (dev -> test -> harvest gate -> prod approval)
-    |-- iac-drift-detection.yml # Scheduled nightly drift detection (terraform plan -detailed-exitcode)
-    `-- iac-reusable-tf-pipeline.yml # Parameterized workflow call per environment
+`-- .github/
+    `-- workflows/
+        |-- ci-scripts.yml          # Automated CI for Python scripts and zero-emoji audits
+        |-- iac-ci-reusable.yml     # Reusable CI workflow called by lightweight caller workflows (fmt, validate, lint, Trivy, Infracost, plan)
+        |-- iac-cd-reusable.yml     # Reusable CD workflow called by platform delivery callers (dev -> test -> harvest gate -> prod approval)
+        |-- iac-drift-detection.yml # Scheduled nightly drift detection (terraform plan -detailed-exitcode)
+        `-- iac-reusable-tf-pipeline.yml # Parameterized workflow call per environment
 ```
 
 ---
@@ -45,8 +47,8 @@ This repository (`aromapacifico-platform/.github`) serves as the central automat
 | Workflow | Trigger | Scope & Actions |
 |---|---|---|
 | `ci-scripts.yml` | Push & PR on `scripts/**`, `pytest.ini` | Executes pytest across Python matrix (3.11, 3.12) and audits zero emojis |
-| `iac-ci-pr.yml` | PR against `main` affecting `iac/**` | Validates syntax, format, TFLint AWS rules, Trivy scan, Infracost diff, and strict OIDC speculative plans |
-| `iac-cd-platform.yml` | Push to `main` affecting `iac/**` | Sequential promotion `dev` -> `test` -> Harvest Window Gate (with PR label API lookup) -> `plan-prod` -> `apply-prod` (manual approval) |
+| `iac-ci-reusable.yml` | `workflow_call` | Centralized reusable CI pipeline with dynamic target detection, quality checks, Infracost, and OIDC speculative plans |
+| `iac-cd-reusable.yml` | `workflow_call` | Centralized reusable CD pipeline with sequential promotion `dev` -> `test` -> Harvest Window Gate -> `plan-prod` -> `apply-prod` (manual approval) |
 | `iac-reusable-tf-pipeline.yml` | `workflow_call` | Decoupled execution: generates `tfplan` binary, uploads immutable artifact, downloads and applies without discrepancy |
 | `iac-drift-detection.yml` | Schedule (`07:00 UTC` / `02:00 COT`) | Non-destructive drift audit across `dev`, `test`, `prod` using `plan -detailed-exitcode` |
 
