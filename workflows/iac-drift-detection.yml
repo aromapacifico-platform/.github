@@ -40,7 +40,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Setup Terraform CLI
-        uses: ./.github/actions/setup-iac-tools
+        uses: aromapacifico-platform/.github/actions/setup-iac-tools@main
         with:
           terraform-version: '1.10.5'
           install-tflint: 'false'

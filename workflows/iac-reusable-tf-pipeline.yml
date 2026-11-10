@@ -76,7 +76,7 @@ jobs:
           echo "path=${TARGET}" >> $GITHUB_OUTPUT
 
       - name: Setup Terraform CLI
-        uses: ./.github/actions/setup-iac-tools
+        uses: aromapacifico-platform/.github/actions/setup-iac-tools@main
         with:
           terraform-version: ${{ inputs.terraform_version }}
           install-tflint: 'false'
@@ -146,7 +146,7 @@ jobs:
           echo "path=${TARGET}" >> $GITHUB_OUTPUT
 
       - name: Setup Terraform CLI
-        uses: ./.github/actions/setup-iac-tools
+        uses: aromapacifico-platform/.github/actions/setup-iac-tools@main
         with:
           terraform-version: ${{ inputs.terraform_version }}
           install-tflint: 'false'
