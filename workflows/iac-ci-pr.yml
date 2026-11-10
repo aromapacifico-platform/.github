@@ -5,6 +5,9 @@ on:
     branches:
       - main
     paths:
+      - 'bootstrap/**'
+      - 'environments/**'
+      - 'modules/**'
       - 'iac/**'
       - '.github/workflows/iac-ci-pr.yml'
       - '.github/actions/setup-iac-tools/**'

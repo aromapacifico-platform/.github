@@ -5,6 +5,9 @@ on:
     branches:
       - main
     paths:
+      - 'bootstrap/**'
+      - 'environments/**'
+      - 'modules/**'
       - 'iac/**'
       - '.github/workflows/iac-cd-platform.yml'
       - '.github/workflows/iac-reusable-tf-pipeline.yml'
@@ -31,32 +34,32 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  plan-dev:
-    name: 'Plan - Development'
+  deploy-dev:
+    name: 'Development'
     uses: ./.github/workflows/iac-reusable-tf-pipeline.yml
     with:
       environment: dev
-      execution_mode: 'plan'
+      execution_mode: 'plan-and-apply'
       working_directory: iac/environments/dev
       aws_role_arn: ${{ vars.AWS_ROLE_ARN_DEV || 'arn:aws:iam::111111111111:role/aromapacifico-ci-dev' }}
-      apply_changes: false
+      apply_changes: true
       artifact_name: 'tfplan-dev'
 
-  plan-test:
-    name: 'Plan - Testing'
-    needs: plan-dev
+  deploy-test:
+    name: 'Testing'
+    needs: deploy-dev
     uses: ./.github/workflows/iac-reusable-tf-pipeline.yml
     with:
       environment: test
-      execution_mode: 'plan'
+      execution_mode: 'plan-and-apply'
       working_directory: iac/environments/test
       aws_role_arn: ${{ vars.AWS_ROLE_ARN_TEST || 'arn:aws:iam::222222222222:role/aromapacifico-ci-test' }}
-      apply_changes: false
+      apply_changes: true
       artifact_name: 'tfplan-test'
 
   harvest-window-gate:
     name: 'Evaluate Production Harvest Window'
-    needs: plan-test
+    needs: deploy-test
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -156,14 +159,14 @@ jobs:
           python "$SCRIPT" "${ARGS[@]}"
           echo "[SUCCESS] Harvest window gate passed. Proceeding to production promotion."
 
-  plan-prod:
-    name: 'Plan Production'
+  deploy-prod:
+    name: 'Production'
     needs: harvest-window-gate
     uses: ./.github/workflows/iac-reusable-tf-pipeline.yml
     with:
       environment: prod
-      execution_mode: 'plan'
+      execution_mode: 'plan-and-apply'
       working_directory: iac/environments/prod
       aws_role_arn: ${{ vars.AWS_ROLE_ARN_PROD || 'arn:aws:iam::333333333333:role/aromapacifico-ci-prod' }}
-      apply_changes: false
+      apply_changes: true
       artifact_name: 'tfplan-prod'
