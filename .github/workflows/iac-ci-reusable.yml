@@ -109,7 +109,13 @@ jobs:
         run: |
           echo "[INFO] Validating module syntax in ${{ matrix.module }}..."
           terraform init -backend=false
-          terraform validate
+          # A module that only receives aliased providers (configuration_aliases)
+          # cannot be validated on its own; its sample fixture validates it below.
+          if grep -rqs "configuration_aliases" --include="*.tf" . && [ -d "sample" ]; then
+            echo "[INFO] Module uses configuration_aliases; validation runs through sample/."
+          else
+            terraform validate
+          fi
 
       - name: Run TFLint on module
         working-directory: ${{ matrix.module }}
@@ -128,7 +134,7 @@ jobs:
         shell: bash
         run: |
           echo "[INFO] Scanning module ${{ matrix.module }} with Trivy..."
-          trivy config --severity HIGH,CRITICAL --exit-code 1 --scanners misconfig .
+          trivy config --severity HIGH,CRITICAL --exit-code 1 .
 
       - name: Validate sample execution fixture (PC-IAC-026)
         working-directory: ${{ matrix.module }}
