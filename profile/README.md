@@ -12,7 +12,7 @@
 - consulta del saco por código, sin exponer datos del caficultor;
 - un servicio de drones para delimitar, confirmar, fumigar, verificar y estimar la cosecha.
 
-### 📦 Repositorios
+### Repositorios
 
 | Repositorio | Qué contiene |
 |---|---|

@@ -1,0 +1,98 @@
+name: 'Setup IaC Tools'
+description: 'Installs and configures Terraform, TFLint with AWS plugins, Trivy security scanner, and Infracost CLI with caching.'
+author: 'Aroma Pacifico DevOps Team'
+
+inputs:
+  terraform-version:
+    description: 'Version of Terraform CLI to install.'
+    required: false
+    default: '1.10.5'
+  tflint-version:
+    description: 'Version of TFLint to install.'
+    required: false
+    default: 'v0.55.0'
+  trivy-version:
+    description: 'Version of Trivy to install.'
+    required: false
+    default: 'v0.58.2'
+  infracost-version:
+    description: 'Version of Infracost CLI to install.'
+    required: false
+    default: 'v0.10.39'
+  install-tflint:
+    description: 'Whether to install and initialize TFLint.'
+    required: false
+    default: 'true'
+  install-trivy:
+    description: 'Whether to install Trivy scanner.'
+    required: false
+    default: 'true'
+  install-infracost:
+    description: 'Whether to install Infracost CLI.'
+    required: false
+    default: 'true'
+  infracost-api-key:
+    description: 'Optional Infracost API key to configure.'
+    required: false
+    default: ''
+  tflint-init:
+    description: 'Whether to run tflint --init after installation.'
+    required: false
+    default: 'true'
+  tflint-config-path:
+    description: 'Path to .tflint.hcl configuration file.'
+    required: false
+    default: 'iac/.tflint.hcl'
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Setup Terraform CLI
+      uses: hashicorp/setup-terraform@v3
+      with:
+        terraform_version: ${{ inputs.terraform-version }}
+        terraform_wrapper: false
+
+    - name: Setup TFLint
+      if: inputs.install-tflint == 'true'
+      uses: terraform-linters/setup-tflint@v4
+      with:
+        tflint_version: ${{ inputs.tflint-version }}
+
+    - name: Cache TFLint plugins directory
+      if: inputs.install-tflint == 'true'
+      uses: actions/cache@v4
+      with:
+        path: ~/.tflint.d/plugins
+        key: ${{ runner.os }}-tflint-${{ hashFiles('**/.tflint.hcl') }}
+        restore-keys: |
+          ${{ runner.os }}-tflint-
+
+    - name: Initialize TFLint plugins
+      if: inputs.install-tflint == 'true' && inputs.tflint-init == 'true'
+      shell: bash
+      run: |
+        echo "[INFO] Initializing TFLint plugins..."
+        if [ -f "${{ inputs.tflint-config-path }}" ]; then
+          tflint --init --config="${{ inputs.tflint-config-path }}"
+        elif [ -f ".tflint.hcl" ]; then
+          tflint --init --config=".tflint.hcl"
+        elif [ -f "iac/.tflint.hcl" ]; then
+          tflint --init --config="iac/.tflint.hcl"
+        else
+          tflint --init
+        fi
+        echo "[INFO] TFLint initialization completed."
+
+    - name: Setup Trivy vulnerability scanner
+      if: inputs.install-trivy == 'true'
+      uses: aquasecurity/setup-trivy@v0.2.2
+      with:
+        version: ${{ inputs.trivy-version }}
+        cache: true
+
+    - name: Setup Infracost CLI
+      if: inputs.install-infracost == 'true'
+      uses: infracost/actions/setup@v3
+      with:
+        api-key: ${{ inputs.infracost-api-key }}

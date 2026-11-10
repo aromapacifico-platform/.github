@@ -1,0 +1,18 @@
+version: 0.1
+
+projects:
+  - path: iac/environments/dev
+    name: dev
+    terraform_vars:
+      environment: dev
+
+  - path: iac/environments/test
+    name: test
+    terraform_vars:
+      environment: test
+
+  - path: iac/environments/prod
+    name: prod
+    terraform_vars:
+      environment: prod
+

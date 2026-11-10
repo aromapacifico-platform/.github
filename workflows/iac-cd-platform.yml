@@ -1,0 +1,172 @@
+name: 'IaC Continuous Delivery (Platform)'
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'bootstrap/**'
+      - 'environments/**'
+      - 'modules/**'
+      - 'iac/**'
+      - '.github/workflows/iac-cd-platform.yml'
+      - '.github/workflows/iac-reusable-tf-pipeline.yml'
+  workflow_dispatch:
+    inputs:
+      emergency_override:
+        description: 'Authorize emergency deployment bypass during harvest freeze window.'
+        required: false
+        type: boolean
+        default: false
+      bypass_reason:
+        description: 'Incident or change ticket justification for emergency bypass.'
+        required: false
+        type: string
+        default: ''
+
+permissions:
+  id-token: write
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: iac-cd-platform-deployment
+  cancel-in-progress: false
+
+jobs:
+  deploy-dev:
+    name: 'Development'
+    uses: ./.github/workflows/iac-reusable-tf-pipeline.yml
+    with:
+      environment: dev
+      execution_mode: 'plan-and-apply'
+      working_directory: iac/environments/dev
+      aws_role_arn: ${{ vars.AWS_ROLE_ARN_DEV || 'arn:aws:iam::111111111111:role/aromapacifico-ci-dev' }}
+      apply_changes: true
+      artifact_name: 'tfplan-dev'
+
+  deploy-test:
+    name: 'Testing'
+    needs: deploy-dev
+    uses: ./.github/workflows/iac-reusable-tf-pipeline.yml
+    with:
+      environment: test
+      execution_mode: 'plan-and-apply'
+      working_directory: iac/environments/test
+      aws_role_arn: ${{ vars.AWS_ROLE_ARN_TEST || 'arn:aws:iam::222222222222:role/aromapacifico-ci-test' }}
+      apply_changes: true
+      artifact_name: 'tfplan-test'
+
+  harvest-window-gate:
+    name: 'Evaluate Production Harvest Window'
+    needs: deploy-test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Inspect Associated Pull Request Labels via GitHub API
+        id: pr-labels
+        if: inputs.emergency_override != true
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            let bypassFound = false;
+            let matchedLabel = '';
+            let matchedPrNumber = null;
+            const targetKeywords = ['incident', 'emergency', 'hotfix', 'override', 'harvest-bypass'];
+
+            try {
+              const { data: prs } = await github.rest.repos.listPullRequestsAssociatedWithCommit({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                commit_sha: context.sha,
+              });
+
+              core.info(`[INFO] Found ${prs.length} pull request(s) associated with commit ${context.sha.substring(0, 7)}`);
+
+              for (const pr of prs) {
+                core.info(`[INFO] Inspecting PR #${pr.number}: ${pr.title}`);
+                if (pr.labels && Array.isArray(pr.labels)) {
+                  for (const label of pr.labels) {
+                    const name = label.name.toLowerCase();
+                    core.info(`[INFO] PR #${pr.number} has label: ${label.name}`);
+                    if (targetKeywords.some(keyword => name.includes(keyword))) {
+                      bypassFound = true;
+                      matchedLabel = label.name;
+                      matchedPrNumber = pr.number;
+                      break;
+                    }
+                  }
+                }
+                if (bypassFound) break;
+              }
+            } catch (error) {
+              core.warning(`[WARN] Failed to query associated pull requests: ${error.message}`);
+            }
+
+            if (bypassFound) {
+              core.info(`[INFO] Emergency bypass authorized via label '${matchedLabel}' on PR #${matchedPrNumber}`);
+              core.setOutput('bypass', 'true');
+              core.setOutput('label', matchedLabel);
+              core.setOutput('pr_number', matchedPrNumber ? String(matchedPrNumber) : '');
+            } else {
+              core.setOutput('bypass', 'false');
+              core.setOutput('label', '');
+              core.setOutput('pr_number', '');
+            }
+
+      - name: Enforce Harvest Freeze Window Gate (05:00 - 18:00 UTC-5)
+        id: gatekeeper
+        shell: bash
+        env:
+          EMERGENCY_INPUT: ${{ inputs.emergency_override || false }}
+          BYPASS_REASON_INPUT: ${{ inputs.bypass_reason || '' }}
+          COMMIT_MSG: ${{ github.event.head_commit.message || '' }}
+          PR_BYPASS: ${{ steps.pr-labels.outputs.bypass || 'false' }}
+          PR_LABEL: ${{ steps.pr-labels.outputs.label || '' }}
+          PR_NUMBER: ${{ steps.pr-labels.outputs.pr_number || '' }}
+        run: |
+          echo "[INFO] Evaluating harvest window restriction for production deployment..."
+          
+          ARGS=()
+          if [ "$EMERGENCY_INPUT" = "true" ]; then
+            echo "[WARN] Emergency override requested via workflow dispatch."
+            echo "[INFO] Justification: ${BYPASS_REASON_INPUT}"
+            ARGS+=( "--emergency" )
+          elif [ "$PR_BYPASS" = "true" ]; then
+            echo "[INFO] Emergency bypass authorized via PR #${PR_NUMBER} label: '${PR_LABEL}'"
+            ARGS+=( "--emergency" "--labels" "$PR_LABEL" )
+          fi
+          
+          # Inspect commit message for emergency/incident indicators
+          LOWER_MSG=$(echo "$COMMIT_MSG" | tr '[:upper:]' '[:lower:]')
+          if [[ "$LOWER_MSG" =~ (emergency|incident|hotfix|override) ]]; then
+            echo "[INFO] Detected incident/hotfix marker in commit message. Authorizing bypass."
+            ARGS+=( "--emergency" )
+          fi
+
+          SCRIPT="scripts/check_harvest_window.py"
+          if [ ! -f "$SCRIPT" ] && [ -f ".github/scripts/check_harvest_window.py" ]; then
+            SCRIPT=".github/scripts/check_harvest_window.py"
+          fi
+          python "$SCRIPT" "${ARGS[@]}"
+          echo "[SUCCESS] Harvest window gate passed. Proceeding to production promotion."
+
+  deploy-prod:
+    name: 'Production'
+    needs: harvest-window-gate
+    uses: ./.github/workflows/iac-reusable-tf-pipeline.yml
+    with:
+      environment: prod
+      execution_mode: 'plan-and-apply'
+      working_directory: iac/environments/prod
+      aws_role_arn: ${{ vars.AWS_ROLE_ARN_PROD || 'arn:aws:iam::333333333333:role/aromapacifico-ci-prod' }}
+      apply_changes: true
+      artifact_name: 'tfplan-prod'

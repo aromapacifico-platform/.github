@@ -1,0 +1,319 @@
+name: 'IaC Continuous Integration (PR)'
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'bootstrap/**'
+      - 'environments/**'
+      - 'modules/**'
+      - 'iac/**'
+      - '.github/workflows/iac-ci-pr.yml'
+      - '.github/actions/setup-iac-tools/**'
+      - 'infracost.yml'
+      - '.github/infracost.yml'
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+  pull-requests: write
+  issues: write
+
+concurrency:
+  group: iac-ci-pr-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  quality-and-security:
+    name: 'Static Quality and Security Analysis'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup IaC Tools (Terraform, TFLint, Trivy, Infracost)
+        uses: ./.github/actions/setup-iac-tools
+        with:
+          terraform-version: '1.10.5'
+          tflint-version: 'v0.55.0'
+          trivy-version: 'v0.58.2'
+          install-infracost: 'false'
+          tflint-config-path: 'iac/.tflint.hcl'
+
+      - name: Check Terraform formatting
+        shell: bash
+        run: |
+          echo "[INFO] Running terraform fmt check..."
+          TARGET="iac"
+          if [ ! -d "iac" ]; then
+            TARGET="."
+          fi
+          terraform fmt -check -recursive "$TARGET"
+
+      - name: Validate Terraform configuration per environment
+        shell: bash
+        run: |
+          set -e
+          PREFIX=""
+          if [ -d "iac" ]; then
+            PREFIX="iac/"
+          fi
+          TARGET_DIRS=("${PREFIX}bootstrap" "${PREFIX}environments/dev" "${PREFIX}environments/test" "${PREFIX}environments/prod")
+          for dir in "${TARGET_DIRS[@]}"; do
+            if [ -d "$dir" ]; then
+              echo "[INFO] Validating syntax in $dir..."
+              (cd "$dir" && terraform init -backend=false && terraform validate)
+            fi
+          done
+
+      - name: Run TFLint recursive inspection
+        shell: bash
+        run: |
+          echo "[INFO] Running TFLint inspection..."
+          CONFIG_FILE=".tflint.hcl"
+          if [ -f "iac/.tflint.hcl" ]; then
+            CONFIG_FILE="iac/.tflint.hcl"
+          fi
+          tflint --recursive --config="$CONFIG_FILE"
+
+      - name: Run Trivy security and misconfiguration scan
+        shell: bash
+        run: |
+          echo "[INFO] Scanning IaC configurations with Trivy..."
+          TARGET="iac"
+          if [ ! -d "iac" ]; then
+            TARGET="."
+          fi
+          trivy config \
+            --severity HIGH,CRITICAL \
+            --exit-code 1 \
+            --scanners misconfig \
+            "$TARGET"
+
+  infracost-finops:
+    name: 'FinOps Cloud Cost Estimation'
+    needs: quality-and-security
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Infracost CLI
+        uses: infracost/actions/setup@v3
+        with:
+          api-key: ${{ secrets.INFRACOST_API_KEY }}
+
+      - name: Generate Infracost Baseline and Diff
+        id: infracost-diff
+        shell: bash
+        env:
+          INFRACOST_API_KEY: ${{ secrets.INFRACOST_API_KEY }}
+        run: |
+          CONFIG_FILE="infracost.yml"
+          if [ ! -f "$CONFIG_FILE" ] && [ -f ".github/infracost.yml" ]; then
+            CONFIG_FILE=".github/infracost.yml"
+          fi
+
+          if [ -z "$INFRACOST_API_KEY" ]; then
+            echo "[WARN] INFRACOST_API_KEY is not configured in repository secrets."
+            echo "[WARN] Skipping FinOps cost diff comment. Please add INFRACOST_API_KEY secret to enable cost estimation."
+            echo "skipped=true" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          echo "[INFO] Generating baseline cost from base branch using $CONFIG_FILE..."
+          git checkout "${{ github.event.pull_request.base.ref || 'main' }}"
+          infracost breakdown --config-file="$CONFIG_FILE" --format=json --out-file=/tmp/infracost-base.json || true
+
+          echo "[INFO] Generating cost diff for pull request branch..."
+          git checkout "${{ github.event.pull_request.head.sha || github.sha }}"
+          infracost diff --config-file="$CONFIG_FILE" \
+            --format=json \
+            --compare-to=/tmp/infracost-base.json \
+            --out-file=/tmp/infracost.json
+
+          echo "skipped=false" >> $GITHUB_OUTPUT
+
+      - name: Post Infracost Comment to Pull Request
+        if: github.event_name == 'pull_request' && steps.infracost-diff.outputs.skipped != 'true'
+        shell: bash
+        run: |
+          if [ -f /tmp/infracost.json ]; then
+            echo "[INFO] Publishing Infracost cost estimation comment to Pull Request..."
+            infracost comment github \
+              --path=/tmp/infracost.json \
+              --repo=${{ github.repository }} \
+              --github-token=${{ secrets.GITHUB_TOKEN }} \
+              --pull-request=${{ github.event.pull_request.number }} \
+              --behavior=update
+          fi
+
+  speculative-plan:
+    name: 'Speculative Plan - ${{ matrix.environment }}'
+    needs: quality-and-security
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        environment: [dev, test, prod]
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform CLI
+        uses: ./.github/actions/setup-iac-tools
+        with:
+          terraform-version: '1.10.5'
+          install-tflint: 'false'
+          install-trivy: 'false'
+          install-infracost: 'false'
+
+      - name: Resolve OIDC Role ARN for Environment
+        id: resolve-role
+        shell: bash
+        env:
+          ROLE_DEV: ${{ vars.AWS_ROLE_ARN_DEV || secrets.AWS_ROLE_ARN_DEV }}
+          ROLE_TEST: ${{ vars.AWS_ROLE_ARN_TEST || secrets.AWS_ROLE_ARN_TEST }}
+          ROLE_PROD: ${{ vars.AWS_ROLE_ARN_PROD || secrets.AWS_ROLE_ARN_PROD }}
+        run: |
+          ENV_NAME="${{ matrix.environment }}"
+          case "$ENV_NAME" in
+            dev)
+              ROLE="${ROLE_DEV:-arn:aws:iam::111111111111:role/aromapacifico-ci-dev}"
+              ;;
+            test)
+              ROLE="${ROLE_TEST:-arn:aws:iam::222222222222:role/aromapacifico-ci-test}"
+              ;;
+            prod)
+              ROLE="${ROLE_PROD:-arn:aws:iam::333333333333:role/aromapacifico-ci-prod}"
+              ;;
+            *)
+              ROLE=""
+              ;;
+          esac
+          echo "role_arn=${ROLE}" >> $GITHUB_OUTPUT
+
+      - name: Authenticate to AWS via OIDC (No Static Credentials)
+        id: aws-auth
+        uses: aws-actions/configure-aws-credentials@v4
+        continue-on-error: true
+        with:
+          role-to-assume: ${{ steps.resolve-role.outputs.role_arn }}
+          aws-region: us-east-1
+          audience: sts.amazonaws.com
+
+      - name: Enforce Strict OIDC Authentication Policy
+        id: verify-auth
+        shell: bash
+        env:
+          AUTH_OUTCOME: ${{ steps.aws-auth.outcome }}
+          IS_FORK: ${{ github.event.pull_request.head.repo.fork }}
+          EVENT_NAME: ${{ github.event_name }}
+          REPO_NAME: ${{ github.repository }}
+        run: |
+          echo "[INFO] Event: $EVENT_NAME | Repository: $REPO_NAME | Is Fork: $IS_FORK | OIDC Outcome: $AUTH_OUTCOME"
+          
+          # Internal branches of the official repository must have successful OIDC authentication
+          if [ "$IS_FORK" != "true" ]; then
+            if [ "$AUTH_OUTCOME" != "success" ]; then
+              echo "[ERROR] AWS OIDC authentication failed for internal branch in $REPO_NAME."
+              echo "[ERROR] Refusing to proceed with speculative plan as a silent false-positive."
+              echo "[ERROR] Verify that the IAM Role '${{ steps.resolve-role.outputs.role_arn }}' exists, trusts $REPO_NAME, and is accessible."
+              exit 1
+            fi
+            echo "[SUCCESS] AWS OIDC authentication validated successfully for internal branch."
+          else
+            echo "[WARN] Pull Request originates from an external fork ($IS_FORK). Skipping live cloud state access."
+          fi
+
+      - name: Execute Terraform Speculative Plan
+        id: tf-plan
+        shell: bash
+        run: |
+          set -e
+          TARGET_DIR="iac/environments/${{ matrix.environment }}"
+          if [ ! -d "$TARGET_DIR" ] && [ -d "environments/${{ matrix.environment }}" ]; then
+            TARGET_DIR="environments/${{ matrix.environment }}"
+          fi
+          cd "$TARGET_DIR"
+          
+          if [ "${{ steps.aws-auth.outcome }}" == "success" ]; then
+            echo "[INFO] Running terraform init with remote S3 backend..."
+            terraform init -backend-config=backend.hcl
+            echo "[INFO] Generating speculative terraform plan..."
+            terraform plan -no-color -lock=false -out=tfplan
+            terraform show -no-color tfplan > plan_output.txt
+          else
+            echo "[WARN] OIDC authentication not completed in this runner. Performing static initialization."
+            terraform init -backend=false
+            echo "Static syntax validation completed. Remote state inspection requires live AWS OIDC role credentials." > plan_output.txt
+          fi
+
+      - name: Post Plan Summary to Pull Request
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const fs = require('fs');
+            let path = `iac/environments/${{ matrix.environment }}/plan_output.txt`;
+            if (!fs.existsSync(path)) {
+              path = `environments/${{ matrix.environment }}/plan_output.txt`;
+            }
+            let planText = 'Plan output not captured.';
+            if (fs.existsSync(path)) {
+              planText = fs.readFileSync(path, 'utf8');
+              if (planText.length > 60000) {
+                planText = planText.substring(0, 60000) + '\n... [Plan output truncated due to GitHub comment size limits]';
+              }
+            }
+
+            const header = `### Terraform Speculative Plan: \`${{ matrix.environment }}\``;
+            const body = `${header}
+            
+| Parameter | Value |
+| --- | --- |
+| Environment | \`${{ matrix.environment }}\` |
+| Working Directory | \`iac/environments/${{ matrix.environment }}\` |
+| Trigger Commit | \`${context.sha.substring(0, 7)}\` |
+| Auth Method | AWS OIDC (${{ steps.aws-auth.outcome }}) |
+
+<details>
+<summary>View Terraform Plan Output</summary>
+
+\`\`\`hcl
+${planText}
+\`\`\`
+
+</details>
+`;
+
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+
+            const botComment = comments.find(comment =>
+              comment.user.type === 'Bot' && comment.body.includes(header)
+            );
+
+            if (botComment) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: botComment.id,
+                body: body
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: body
+              });
+            }

@@ -1,0 +1,15 @@
+# Global code ownership for Aroma Pacifico Platform CI/CD and Governance
+* @devops-fnc @Juanmadiaz45
+
+# Workflows and composite actions
+.github/workflows/ @devops-fnc @Juanmadiaz45 @Juanda-2880
+.github/actions/ @devops-fnc @Juanmadiaz45 @Juanda-2880
+
+# Automation scripts and gatekeepers
+.github/scripts/ @devops-fnc @Juanmadiaz45 @Juanda-2880
+
+# Issue templates, PR templates, and community profiles
+.github/ISSUE_TEMPLATE/ @devops-fnc @Juanmadiaz45
+.github/PULL_REQUEST_TEMPLATE.md @devops-fnc @Juanmadiaz45
+.github/profile/ @devops-fnc @Juanmadiaz45 @juandavid175
+
