@@ -18,6 +18,11 @@ on:
         required: false
         type: string
         default: '1.15.8'
+      aws_region:
+        description: 'Target AWS region. Strictly restricted to us-east-1 (primary) or us-east-2 (backup).'
+        required: false
+        type: string
+        default: 'us-east-1'
     secrets:
       AWS_ROLE_ARN_DEV:
         required: false
@@ -38,6 +43,18 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: Validate AWS Region
+        shell: bash
+        env:
+          TARGET_REGION: ${{ inputs.aws_region }}
+        run: |
+          echo "[INFO] Validating deployment region: ${TARGET_REGION}..."
+          if [ "${TARGET_REGION}" != "us-east-1" ] && [ "${TARGET_REGION}" != "us-east-2" ]; then
+            echo "::error::Invalid AWS region '${TARGET_REGION}'. AromaPacifico mandates 'us-east-1' (primary) or 'us-east-2' (backup)."
+            exit 1
+          fi
+          echo "[SUCCESS] Region '${TARGET_REGION}' is authorized."
 
       - name: Setup Terraform CLI via Central .github Composite Action
         uses: aromapacifico-platform/.github/actions/setup-iac-tools@main
@@ -62,12 +79,15 @@ jobs:
         continue-on-error: true
         with:
           role-to-assume: ${{ steps.resolve-role.outputs.role_arn }}
-          aws-region: us-east-1
+          aws-region: ${{ inputs.aws_region }}
           audience: sts.amazonaws.com
 
       - name: Plan and Validate Development
         working-directory: environments/dev
         shell: bash
+        env:
+          AWS_REGION: ${{ inputs.aws_region }}
+          AWS_DEFAULT_REGION: ${{ inputs.aws_region }}
         run: |
           echo "[INFO] Running dev deployment verification and speculative plan..."
           if [ "${{ steps.aws-auth.outcome }}" != "success" ] && [ -n "${{ steps.resolve-role.outputs.role_arn }}" ]; then
@@ -106,6 +126,18 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Validate AWS Region
+        shell: bash
+        env:
+          TARGET_REGION: ${{ inputs.aws_region }}
+        run: |
+          echo "[INFO] Validating deployment region: ${TARGET_REGION}..."
+          if [ "${TARGET_REGION}" != "us-east-1" ] && [ "${TARGET_REGION}" != "us-east-2" ]; then
+            echo "::error::Invalid AWS region '${TARGET_REGION}'. AromaPacifico mandates 'us-east-1' (primary) or 'us-east-2' (backup)."
+            exit 1
+          fi
+          echo "[SUCCESS] Region '${TARGET_REGION}' is authorized."
+
       - name: Setup Terraform CLI via Central .github Composite Action
         uses: aromapacifico-platform/.github/actions/setup-iac-tools@main
         with:
@@ -129,12 +161,15 @@ jobs:
         continue-on-error: true
         with:
           role-to-assume: ${{ steps.resolve-role.outputs.role_arn }}
-          aws-region: us-east-1
+          aws-region: ${{ inputs.aws_region }}
           audience: sts.amazonaws.com
 
       - name: Plan and Validate Testing
         working-directory: environments/test
         shell: bash
+        env:
+          AWS_REGION: ${{ inputs.aws_region }}
+          AWS_DEFAULT_REGION: ${{ inputs.aws_region }}
         run: |
           echo "[INFO] Running test deployment verification and speculative plan..."
           if [ "${{ steps.aws-auth.outcome }}" != "success" ] && [ -n "${{ steps.resolve-role.outputs.role_arn }}" ]; then
@@ -210,6 +245,18 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Validate AWS Region
+        shell: bash
+        env:
+          TARGET_REGION: ${{ inputs.aws_region }}
+        run: |
+          echo "[INFO] Validating deployment region: ${TARGET_REGION}..."
+          if [ "${TARGET_REGION}" != "us-east-1" ] && [ "${TARGET_REGION}" != "us-east-2" ]; then
+            echo "::error::Invalid AWS region '${TARGET_REGION}'. AromaPacifico mandates 'us-east-1' (primary) or 'us-east-2' (backup)."
+            exit 1
+          fi
+          echo "[SUCCESS] Region '${TARGET_REGION}' is authorized."
+
       - name: Setup Terraform CLI via Central .github Composite Action
         uses: aromapacifico-platform/.github/actions/setup-iac-tools@main
         with:
@@ -233,12 +280,15 @@ jobs:
         continue-on-error: true
         with:
           role-to-assume: ${{ steps.resolve-role.outputs.role_arn }}
-          aws-region: us-east-1
+          aws-region: ${{ inputs.aws_region }}
           audience: sts.amazonaws.com
 
       - name: Plan Production
         working-directory: environments/prod
         shell: bash
+        env:
+          AWS_REGION: ${{ inputs.aws_region }}
+          AWS_DEFAULT_REGION: ${{ inputs.aws_region }}
         run: |
           echo "[INFO] Generating binary plan tfplan for production..."
           if [ "${{ steps.aws-auth.outcome }}" != "success" ] && [ -n "${{ steps.resolve-role.outputs.role_arn }}" ]; then
