@@ -36,8 +36,7 @@ This repository (`aromapacifico-platform/.github`) serves as the central automat
         |-- ci-scripts.yml          # Automated CI for Python scripts and zero-emoji audits
         |-- iac-ci-reusable.yml     # Reusable CI workflow called by lightweight caller workflows (fmt, validate, lint, Trivy, Infracost, plan)
         |-- iac-cd-reusable.yml     # Reusable CD workflow called by platform delivery callers (dev -> test -> harvest gate -> prod approval)
-        |-- iac-drift-detection.yml # Scheduled nightly drift detection (terraform plan -detailed-exitcode)
-        `-- iac-reusable-tf-pipeline.yml # Parameterized workflow call per environment
+        `-- iac-drift-detection.yml # Scheduled nightly drift detection (terraform plan -detailed-exitcode)
 ```
 
 ---
@@ -49,7 +48,6 @@ This repository (`aromapacifico-platform/.github`) serves as the central automat
 | `ci-scripts.yml` | Push & PR on `scripts/**`, `pytest.ini` | Executes pytest across Python matrix (3.11, 3.12) and audits zero emojis |
 | `iac-ci-reusable.yml` | `workflow_call` | Centralized reusable CI pipeline with dynamic target detection, quality checks, Infracost, and OIDC speculative plans |
 | `iac-cd-reusable.yml` | `workflow_call` | Centralized reusable CD pipeline with sequential promotion `dev` -> `test` -> Harvest Window Gate -> `plan-prod` -> `apply-prod` (manual approval) |
-| `iac-reusable-tf-pipeline.yml` | `workflow_call` | Decoupled execution: generates `tfplan` binary, uploads immutable artifact, downloads and applies without discrepancy |
 | `iac-drift-detection.yml` | Schedule (`07:00 UTC` / `02:00 COT`) | Non-destructive drift audit across `dev`, `test`, `prod` using `plan -detailed-exitcode` |
 
 ---
