@@ -17,7 +17,7 @@ on:
         description: 'Version of Terraform CLI.'
         required: false
         type: string
-        default: '1.10.5'
+        default: '1.15.8'
     secrets:
       AWS_ROLE_ARN_DEV:
         required: false
@@ -40,7 +40,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Setup Terraform CLI via Central .github Composite Action
-        uses: aromapacifico-platform/.github/actions/setup-iac-tools@main
+        uses: aromapacifico-platform/.github/actions/setup-iac-tools@v1.0.0
         with:
           terraform-version: ${{ inputs.terraform_version }}
           install-tflint: 'false'
@@ -74,7 +74,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Setup Terraform CLI via Central .github Composite Action
-        uses: aromapacifico-platform/.github/actions/setup-iac-tools@main
+        uses: aromapacifico-platform/.github/actions/setup-iac-tools@v1.0.0
         with:
           terraform-version: ${{ inputs.terraform_version }}
           install-tflint: 'false'
@@ -145,7 +145,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Setup Terraform CLI via Central .github Composite Action
-        uses: aromapacifico-platform/.github/actions/setup-iac-tools@main
+        uses: aromapacifico-platform/.github/actions/setup-iac-tools@v1.0.0
         with:
           terraform-version: ${{ inputs.terraform_version }}
           install-tflint: 'false'

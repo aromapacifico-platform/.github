@@ -7,7 +7,7 @@ on:
         description: 'Version of Terraform CLI to install.'
         required: false
         type: string
-        default: '1.10.5'
+        default: '1.15.8'
       tflint-version:
         description: 'Version of TFLint CLI to install.'
         required: false
@@ -17,7 +17,7 @@ on:
         description: 'Version of Trivy scanner to install.'
         required: false
         type: string
-        default: 'v0.58.2'
+        default: 'v0.76.1'
     secrets:
       INFRACOST_API_KEY:
         required: false
@@ -88,7 +88,7 @@ jobs:
 
       # Governance: Central action invocation from aromapacifico-platform/.github
       - name: Setup IaC Tools via Central .github Composite Action
-        uses: aromapacifico-platform/.github/actions/setup-iac-tools@main
+        uses: aromapacifico-platform/.github/actions/setup-iac-tools@v1.0.0
         with:
           terraform-version: ${{ inputs.terraform-version }}
           tflint-version: ${{ inputs.tflint-version }}
@@ -164,7 +164,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Setup Terraform CLI via Central .github Composite Action
-        uses: aromapacifico-platform/.github/actions/setup-iac-tools@main
+        uses: aromapacifico-platform/.github/actions/setup-iac-tools@v1.0.0
         with:
           terraform-version: ${{ inputs.terraform-version }}
           install-tflint: 'false'
@@ -285,7 +285,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Setup Terraform CLI via Central .github Composite Action
-        uses: aromapacifico-platform/.github/actions/setup-iac-tools@main
+        uses: aromapacifico-platform/.github/actions/setup-iac-tools@v1.0.0
         with:
           terraform-version: ${{ inputs.terraform-version }}
           install-tflint: 'false'
@@ -359,16 +359,9 @@ jobs:
             exit 1
           fi
           cd "$TARGET_DIR"
-          if terraform init -input=false -backend-config=backend.hcl; then
-            echo "[INFO] Planning against the remote S3 state."
-          else
-            # Academic scope: the team only plans, it never applies. Without a
-            # state bucket the plan runs with a temporary local state; nothing
-            # is created in AWS.
-            echo "[INFO] No remote state bucket. Planning with a temporary local state."
-            printf 'terraform {\n  backend "local" {}\n}\n' > backend_override.tf
-            terraform init -input=false -reconfigure
-          fi
+          echo "[INFO] Initializing Terraform backend for ${{ matrix.environment }} against remote S3 state..."
+          terraform init -input=false -backend-config=backend.hcl
+          echo "[INFO] Running speculative plan for ${{ matrix.environment }}..."
           terraform plan -input=false -no-color -lock=false -out=tfplan
           terraform show -no-color tfplan > plan_output.txt
 
