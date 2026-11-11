@@ -30,7 +30,7 @@ on:
         description: 'Version of Terraform CLI.'
         required: false
         type: string
-        default: '1.10.5'
+        default: '1.15.8'
       apply_changes:
         description: 'Whether to execute the apply stage (default true in plan-and-apply mode).'
         required: false
@@ -76,7 +76,7 @@ jobs:
           echo "path=${TARGET}" >> $GITHUB_OUTPUT
 
       - name: Setup Terraform CLI
-        uses: aromapacifico-platform/.github/actions/setup-iac-tools@main
+        uses: aromapacifico-platform/.github/actions/setup-iac-tools@v1.0.0
         with:
           terraform-version: ${{ inputs.terraform_version }}
           install-tflint: 'false'
@@ -146,7 +146,7 @@ jobs:
           echo "path=${TARGET}" >> $GITHUB_OUTPUT
 
       - name: Setup Terraform CLI
-        uses: aromapacifico-platform/.github/actions/setup-iac-tools@main
+        uses: aromapacifico-platform/.github/actions/setup-iac-tools@v1.0.0
         with:
           terraform-version: ${{ inputs.terraform_version }}
           install-tflint: 'false'
