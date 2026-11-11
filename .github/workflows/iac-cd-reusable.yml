@@ -17,7 +17,7 @@ on:
         description: 'Version of Terraform CLI.'
         required: false
         type: string
-        default: '1.10.5'
+        default: '1.15.8'
     secrets:
       AWS_ROLE_ARN_DEV:
         required: false
@@ -47,12 +47,21 @@ jobs:
           install-trivy: 'false'
           install-infracost: 'false'
 
+      - name: Resolve OIDC Role ARN
+        id: resolve-role
+        shell: bash
+        env:
+          ROLE_DEV: ${{ vars.AWS_ROLE_ARN_DEV || secrets.AWS_ROLE_ARN_DEV || '' }}
+        run: |
+          echo "role_arn=${ROLE_DEV}" >> $GITHUB_OUTPUT
+
       - name: Authenticate to AWS via OIDC
-        if: vars.AWS_ROLE_ARN_DEV != ''
+        id: aws-auth
+        if: steps.resolve-role.outputs.role_arn != ''
         uses: aws-actions/configure-aws-credentials@v4
         continue-on-error: true
         with:
-          role-to-assume: ${{ vars.AWS_ROLE_ARN_DEV || secrets.AWS_ROLE_ARN_DEV }}
+          role-to-assume: ${{ steps.resolve-role.outputs.role_arn }}
           aws-region: us-east-1
           audience: sts.amazonaws.com
 
@@ -60,10 +69,34 @@ jobs:
         working-directory: environments/dev
         shell: bash
         run: |
-          echo "[INFO] Running dev deployment verification..."
-          terraform init -backend=false
+          echo "[INFO] Running dev deployment verification and speculative plan..."
+          if [ "${{ steps.aws-auth.outcome }}" != "success" ] && [ -n "${{ steps.resolve-role.outputs.role_arn }}" ]; then
+            echo "::error::No OIDC role configured or auth failed for dev; a plan needs AWS credentials."
+            exit 1
+          fi
+
+          if terraform init -input=false -backend-config=backend.hcl; then
+            echo "[INFO] Planning against the remote S3 state."
+          else
+            # Academic scope: the team only plans, it never applies. Without a
+            # state bucket the plan runs with a temporary local state; nothing
+            # is created in AWS.
+            echo "[INFO] No remote state bucket. Planning with a temporary local state."
+            printf 'terraform {\n  backend "local" {}\n}\n' > backend_override.tf
+            terraform init -input=false -reconfigure
+          fi
+
           terraform validate
-          echo "[SUCCESS] Development validation completed successfully."
+          terraform plan -input=false -no-color -lock=false -out=tfplan
+          terraform show -no-color tfplan > plan_output.txt
+          echo "[SUCCESS] Development plan completed successfully."
+
+      - name: Upload Development Plan Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: plan-dev
+          path: environments/dev/plan_output.txt
+          retention-days: 14
 
   deploy-test:
     name: 'Deploy - Testing'
@@ -81,12 +114,21 @@ jobs:
           install-trivy: 'false'
           install-infracost: 'false'
 
+      - name: Resolve OIDC Role ARN
+        id: resolve-role
+        shell: bash
+        env:
+          ROLE_TEST: ${{ vars.AWS_ROLE_ARN_TEST || secrets.AWS_ROLE_ARN_TEST || '' }}
+        run: |
+          echo "role_arn=${ROLE_TEST}" >> $GITHUB_OUTPUT
+
       - name: Authenticate to AWS via OIDC
-        if: vars.AWS_ROLE_ARN_TEST != ''
+        id: aws-auth
+        if: steps.resolve-role.outputs.role_arn != ''
         uses: aws-actions/configure-aws-credentials@v4
         continue-on-error: true
         with:
-          role-to-assume: ${{ vars.AWS_ROLE_ARN_TEST || secrets.AWS_ROLE_ARN_TEST }}
+          role-to-assume: ${{ steps.resolve-role.outputs.role_arn }}
           aws-region: us-east-1
           audience: sts.amazonaws.com
 
@@ -94,10 +136,34 @@ jobs:
         working-directory: environments/test
         shell: bash
         run: |
-          echo "[INFO] Running test deployment verification..."
-          terraform init -backend=false
+          echo "[INFO] Running test deployment verification and speculative plan..."
+          if [ "${{ steps.aws-auth.outcome }}" != "success" ] && [ -n "${{ steps.resolve-role.outputs.role_arn }}" ]; then
+            echo "::error::No OIDC role configured or auth failed for test; a plan needs AWS credentials."
+            exit 1
+          fi
+
+          if terraform init -input=false -backend-config=backend.hcl; then
+            echo "[INFO] Planning against the remote S3 state."
+          else
+            # Academic scope: the team only plans, it never applies. Without a
+            # state bucket the plan runs with a temporary local state; nothing
+            # is created in AWS.
+            echo "[INFO] No remote state bucket. Planning with a temporary local state."
+            printf 'terraform {\n  backend "local" {}\n}\n' > backend_override.tf
+            terraform init -input=false -reconfigure
+          fi
+
           terraform validate
-          echo "[SUCCESS] Testing validation completed successfully."
+          terraform plan -input=false -no-color -lock=false -out=tfplan
+          terraform show -no-color tfplan > plan_output.txt
+          echo "[SUCCESS] Testing plan completed successfully."
+
+      - name: Upload Testing Plan Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: plan-test
+          path: environments/test/plan_output.txt
+          retention-days: 14
 
   harvest-window-gate:
     name: 'Evaluate Production Harvest Window'
@@ -152,12 +218,21 @@ jobs:
           install-trivy: 'false'
           install-infracost: 'false'
 
+      - name: Resolve OIDC Role ARN
+        id: resolve-role
+        shell: bash
+        env:
+          ROLE_PROD: ${{ vars.AWS_ROLE_ARN_PROD || secrets.AWS_ROLE_ARN_PROD || '' }}
+        run: |
+          echo "role_arn=${ROLE_PROD}" >> $GITHUB_OUTPUT
+
       - name: Authenticate to AWS via OIDC
-        if: vars.AWS_ROLE_ARN_PROD != ''
+        id: aws-auth
+        if: steps.resolve-role.outputs.role_arn != ''
         uses: aws-actions/configure-aws-credentials@v4
         continue-on-error: true
         with:
-          role-to-assume: ${{ vars.AWS_ROLE_ARN_PROD || secrets.AWS_ROLE_ARN_PROD }}
+          role-to-assume: ${{ steps.resolve-role.outputs.role_arn }}
           aws-region: us-east-1
           audience: sts.amazonaws.com
 
@@ -166,16 +241,33 @@ jobs:
         shell: bash
         run: |
           echo "[INFO] Generating binary plan tfplan for production..."
-          terraform init -backend=false
+          if [ "${{ steps.aws-auth.outcome }}" != "success" ] && [ -n "${{ steps.resolve-role.outputs.role_arn }}" ]; then
+            echo "::error::No OIDC role configured or auth failed for prod; a plan needs AWS credentials."
+            exit 1
+          fi
+
+          if terraform init -input=false -backend-config=backend.hcl; then
+            echo "[INFO] Planning against the remote S3 state."
+          else
+            # Academic scope: the team only plans, it never applies. Without a
+            # state bucket the plan runs with a temporary local state; nothing
+            # is created in AWS.
+            echo "[INFO] No remote state bucket. Planning with a temporary local state."
+            printf 'terraform {\n  backend "local" {}\n}\n' > backend_override.tf
+            terraform init -input=false -reconfigure
+          fi
+
           terraform validate
-          echo "Verified immutable plan placeholder for prod" > tfplan.txt
+          terraform plan -input=false -no-color -lock=false -out=tfplan
+          terraform show -no-color tfplan > tfplan.txt
+          echo "[SUCCESS] Production plan generated successfully."
 
       - name: Upload Immutable Plan Artifact
         uses: actions/upload-artifact@v4
         with:
           name: tfplan-prod
           path: environments/prod/tfplan.txt
-          retention-days: 2
+          retention-days: 14
 
   apply-prod:
     name: 'Apply - Production'
@@ -208,4 +300,3 @@ jobs:
             cat tfplan.txt
             echo "[SUCCESS] Verified immutable plan for prod passed manual review and apply verification successfully."
           fi
-
