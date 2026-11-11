@@ -57,7 +57,7 @@ jobs:
           echo "[SUCCESS] Region '${TARGET_REGION}' is authorized."
 
       - name: Setup Terraform CLI via Central .github Composite Action
-        uses: aromapacifico-platform/.github/actions/setup-iac-tools@main
+        uses: aromapacifico-platform/.github/actions/setup-iac-tools@v1.0.0
         with:
           terraform-version: ${{ inputs.terraform_version }}
           install-tflint: 'false'
@@ -139,7 +139,7 @@ jobs:
           echo "[SUCCESS] Region '${TARGET_REGION}' is authorized."
 
       - name: Setup Terraform CLI via Central .github Composite Action
-        uses: aromapacifico-platform/.github/actions/setup-iac-tools@main
+        uses: aromapacifico-platform/.github/actions/setup-iac-tools@v1.0.0
         with:
           terraform-version: ${{ inputs.terraform_version }}
           install-tflint: 'false'
@@ -258,7 +258,7 @@ jobs:
           echo "[SUCCESS] Region '${TARGET_REGION}' is authorized."
 
       - name: Setup Terraform CLI via Central .github Composite Action
-        uses: aromapacifico-platform/.github/actions/setup-iac-tools@main
+        uses: aromapacifico-platform/.github/actions/setup-iac-tools@v1.0.0
         with:
           terraform-version: ${{ inputs.terraform_version }}
           install-tflint: 'false'

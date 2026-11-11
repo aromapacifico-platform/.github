@@ -6,7 +6,7 @@ inputs:
   terraform-version:
     description: 'Version of Terraform CLI to install.'
     required: false
-    default: '1.10.5'
+    default: '1.15.8'
   tflint-version:
     description: 'Version of TFLint to install.'
     required: false
@@ -14,7 +14,7 @@ inputs:
   trivy-version:
     description: 'Version of Trivy to install.'
     required: false
-    default: 'v0.58.2'
+    default: 'v0.76.1'
   infracost-version:
     description: 'Version of Infracost CLI to install.'
     required: false
