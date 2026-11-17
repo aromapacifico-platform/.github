@@ -241,7 +241,6 @@ jobs:
           EMERGENCY_INPUT: ${{ inputs.emergency_override || false }}
           BYPASS_REASON_INPUT: ${{ inputs.bypass_reason || '' }}
           PR_LABELS_LIST: ${{ steps.pr-labels.outputs.labels }}
-          COMMIT_MSG: ${{ github.event.head_commit.message || '' }}
         run: |
           echo "[INFO] Evaluating harvest freeze window restriction..."
           ARGS=()
@@ -250,14 +249,11 @@ jobs:
               echo "::error::emergency_override=true requires a non-empty bypass_reason (incident or change ticket)."
               exit 1
             fi
+            echo "[AUDIT] Emergency override requested with ticket/reason: ${BYPASS_REASON_INPUT}"
             ARGS+=( "--emergency" )
           fi
           if [ -n "$PR_LABELS_LIST" ]; then
             ARGS+=( "--labels" "$PR_LABELS_LIST" )
-          fi
-          LOWER_MSG=$(echo "$COMMIT_MSG" | tr '[:upper:]' '[:lower:]')
-          if [[ "$LOWER_MSG" =~ \[(emergency|incident|hotfix)\] ]]; then
-            ARGS+=( "--emergency" )
           fi
           if [ -f ".github/scripts/check_harvest_window.py" ]; then
             python .github/scripts/check_harvest_window.py "${ARGS[@]}"

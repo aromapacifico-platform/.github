@@ -170,6 +170,17 @@ jobs:
             echo "[INFO] No sample directory present in ${{ matrix.module }}."
           fi
 
+      - name: Run Terraform Tests (PC-IAC-018)
+        working-directory: ${{ matrix.module }}
+        shell: bash
+        run: |
+          if [ -d "tests" ] && compgen -G "tests/*.tftest.hcl" > /dev/null; then
+            echo "[INFO] Running terraform test in ${{ matrix.module }}..."
+            terraform test
+          else
+            echo "[INFO] No *.tftest.hcl test files found in ${{ matrix.module }}/tests."
+          fi
+
   validate-environments:
     name: 'Validate Environment (${{ matrix.environment }})'
     needs: detect-changes
@@ -204,6 +215,21 @@ jobs:
             terraform fmt -check -recursive .
             terraform init -backend=false
             terraform validate
+          fi
+
+      - name: Run Terraform Tests (PC-IAC-018)
+        shell: bash
+        run: |
+          TARGET="environments/${{ matrix.environment }}"
+          if [ ! -d "$TARGET" ] && [ -d "iac/environments/${{ matrix.environment }}" ]; then
+            TARGET="iac/environments/${{ matrix.environment }}"
+          fi
+          if [ -d "$TARGET/tests" ] && compgen -G "$TARGET/tests/*.tftest.hcl" > /dev/null; then
+            echo "[INFO] Running terraform test in $TARGET..."
+            cd "$TARGET"
+            terraform test
+          else
+            echo "[INFO] No *.tftest.hcl test files found in $TARGET/tests."
           fi
 
   infracost-finops:
@@ -294,7 +320,7 @@ jobs:
   speculative-plan:
     name: 'Speculative Plan - ${{ matrix.environment }}'
     needs: [detect-changes, validate-environments]
-    if: always() && (needs.detect-changes.outputs.has_environments == 'true' || needs.detect-changes.outputs.all_triggered == 'true')
+    if: needs.validate-environments.result == 'success' && (needs.detect-changes.outputs.has_environments == 'true' || needs.detect-changes.outputs.all_triggered == 'true')
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -379,8 +405,16 @@ jobs:
             exit 1
           fi
           cd "$TARGET_DIR"
-          echo "[INFO] Initializing Terraform backend for ${{ matrix.environment }} against remote S3 state..."
-          terraform init -input=false -backend-config=backend.hcl
+          if terraform init -input=false -backend-config=backend.hcl; then
+            echo "[INFO] Planning ${{ matrix.environment }} against the remote S3 state."
+          else
+            # Academic scope: the team only plans, it never applies. Without a
+            # state bucket the plan runs with a temporary local state; nothing
+            # is created in AWS.
+            echo "[INFO] No remote state bucket. Planning ${{ matrix.environment }} with a temporary local state."
+            printf 'terraform {\n  backend "local" {}\n}\n' > backend_override.tf
+            terraform init -input=false -reconfigure
+          fi
           echo "[INFO] Running speculative plan for ${{ matrix.environment }}..."
           terraform plan -input=false -no-color -lock=false -out=tfplan
           terraform show -no-color tfplan > plan_output.txt

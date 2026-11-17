@@ -34,9 +34,9 @@ This repository (`aromapacifico-platform/.github`) serves as the central automat
 `-- .github/
     `-- workflows/
         |-- ci-scripts.yml          # Automated CI for Python scripts and zero-emoji audits
-        |-- iac-ci-reusable.yml     # Reusable CI workflow called by lightweight caller workflows (fmt, validate, lint, Trivy, Infracost, plan)
+        |-- iac-ci-reusable.yml     # Reusable CI workflow called by lightweight caller workflows (fmt, validate, terraform test, lint, Trivy, Infracost, plan)
         |-- iac-cd-reusable.yml     # Reusable CD workflow called by platform delivery callers (dev -> test -> harvest gate -> prod approval)
-        `-- iac-drift-detection.yml # Scheduled nightly drift detection (terraform plan -detailed-exitcode)
+        `-- iac-drift-detection.yml # Manual drift audit triggered via workflow_dispatch (terraform plan -detailed-exitcode)
 ```
 
 ---
@@ -46,9 +46,9 @@ This repository (`aromapacifico-platform/.github`) serves as the central automat
 | Workflow | Trigger | Scope & Actions |
 |---|---|---|
 | `ci-scripts.yml` | Push & PR on `scripts/**`, `pytest.ini` | Executes pytest across Python matrix (3.11, 3.12) and audits zero emojis |
-| `iac-ci-reusable.yml` | `workflow_call` | Centralized reusable CI pipeline with dynamic target detection, quality checks, Infracost, and OIDC speculative plans |
+| `iac-ci-reusable.yml` | `workflow_call` | Centralized reusable CI pipeline with dynamic target detection, quality checks, `terraform test`, Infracost, and OIDC speculative plans |
 | `iac-cd-reusable.yml` | `workflow_call` | Centralized reusable CD pipeline with sequential promotion `dev` -> `test` -> Harvest Window Gate -> `plan-prod` -> `apply-prod` (manual approval) |
-| `iac-drift-detection.yml` | Schedule (`07:00 UTC` / `02:00 COT`) | Non-destructive drift audit across `dev`, `test`, `prod` using `plan -detailed-exitcode` |
+| `iac-drift-detection.yml` | `workflow_dispatch` | Non-destructive manual drift audit across `dev`, `test`, `prod` using `plan -detailed-exitcode` |
 
 ---
 
@@ -62,7 +62,7 @@ This repository (`aromapacifico-platform/.github`) serves as the central automat
    - Workflows assume least-privilege IAM roles via `aws-actions/configure-aws-credentials` using `id-token: write`.
 3. **Harvest Window Production Freeze**:
    - Deployments to `prod` are prohibited between 05:00:00 and 18:00:00 (America/Bogota, UTC-5) during harvest seasons in Cauca, Huila, and Tolima.
-   - Emergency bypass is permitted only with explicit flags (`--emergency`), approved labels (`incident`, `hotfix`), or documented incident tags.
+   - Emergency bypass is permitted only with explicit audited overrides (`emergency_override=true` with `bypass_reason`) or the official `incident` PR label.
 4. **FinOps Cost Governance**:
    - Infracost analyzes pull requests to project monthly cloud expenditure impact before changes merge to `main`.
 5. **Manual Push Invariant**:
