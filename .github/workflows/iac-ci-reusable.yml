@@ -73,6 +73,26 @@ jobs:
             echo "all_triggered=true" >> $GITHUB_OUTPUT
           fi
 
+  secret-scan:
+    name: 'Secret Scan (PC-IAC-016 / PC-IAC-018)'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Trivy Scanner
+        uses: aromapacifico-platform/.github/actions/setup-iac-tools@v1.0.0
+        with:
+          install-tflint: 'false'
+          install-trivy: 'true'
+          install-infracost: 'false'
+
+      - name: Scan Repository for Exposed Secrets
+        shell: bash
+        run: |
+          echo "[INFO] Scanning repository for hardcoded secrets and credentials..."
+          trivy fs --scanners secret --exit-code 1 .
+
   validate-modules:
     name: 'Validate Module (${{ matrix.module }})'
     needs: detect-changes
