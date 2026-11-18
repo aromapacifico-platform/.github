@@ -56,13 +56,13 @@ jobs:
           ENV_NAME="${{ matrix.environment }}"
           case "$ENV_NAME" in
             dev)
-              ROLE="${ROLE_DEV:-arn:aws:iam::111111111111:role/aromapacifico-ci-dev}"
+              ROLE="${ROLE_DEV:-}"
               ;;
             test)
-              ROLE="${ROLE_TEST:-arn:aws:iam::222222222222:role/aromapacifico-ci-test}"
+              ROLE="${ROLE_TEST:-}"
               ;;
             prod)
-              ROLE="${ROLE_PROD:-arn:aws:iam::333333333333:role/aromapacifico-ci-prod}"
+              ROLE="${ROLE_PROD:-}"
               ;;
             *)
               ROLE=""
@@ -72,6 +72,7 @@ jobs:
 
       - name: Authenticate to AWS via OIDC
         id: aws-auth
+        if: steps.resolve-role.outputs.role_arn != ''
         uses: aws-actions/configure-aws-credentials@v4
         continue-on-error: true
         with:

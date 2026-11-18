@@ -213,22 +213,47 @@ jobs:
         with:
           python-version: '3.11'
 
+      - name: Inspect Associated PR Labels via GitHub API
+        id: pr-labels
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            try {
+              const { data: prs } = await github.rest.repos.listPullRequestsAssociatedWithCommit({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                commit_sha: context.sha,
+              });
+              const labels = prs.flatMap(pr => (pr.labels || []).map(l => l.name));
+              const unique = [...new Set(labels)];
+              core.info(`Associated PR labels: ${unique.join(', ') || '(none)'}`);
+              core.setOutput('labels', unique.join(','));
+            } catch (err) {
+              core.warning(`Could not query associated PRs: ${err.message}`);
+              core.setOutput('labels', '');
+            }
+
       - name: Enforce Harvest Freeze Window Gate (05:00 - 18:00 UTC-5)
         id: gatekeeper
         shell: bash
         env:
           EMERGENCY_INPUT: ${{ inputs.emergency_override || false }}
           BYPASS_REASON_INPUT: ${{ inputs.bypass_reason || '' }}
-          COMMIT_MSG: ${{ github.event.head_commit.message || '' }}
+          PR_LABELS_LIST: ${{ steps.pr-labels.outputs.labels }}
         run: |
           echo "[INFO] Evaluating harvest freeze window restriction..."
           ARGS=()
           if [ "$EMERGENCY_INPUT" = "true" ]; then
+            if [ -z "${BYPASS_REASON_INPUT// }" ]; then
+              echo "::error::emergency_override=true requires a non-empty bypass_reason (incident or change ticket)."
+              exit 1
+            fi
+            echo "[AUDIT] Emergency override requested with ticket/reason: ${BYPASS_REASON_INPUT}"
             ARGS+=( "--emergency" )
           fi
-          LOWER_MSG=$(echo "$COMMIT_MSG" | tr '[:upper:]' '[:lower:]')
-          if [[ "$LOWER_MSG" =~ (emergency|incident|hotfix|override) ]]; then
-            ARGS+=( "--emergency" )
+          if [ -n "$PR_LABELS_LIST" ]; then
+            ARGS+=( "--labels" "$PR_LABELS_LIST" )
           fi
           if [ -f ".github/scripts/check_harvest_window.py" ]; then
             python .github/scripts/check_harvest_window.py "${ARGS[@]}"
@@ -339,14 +364,7 @@ jobs:
         shell: bash
         run: |
           echo "[INFO] Manual approval gate successfully passed for environment: prod."
-          echo "[INFO] Immutable binary plan artifact verified and locked."
-          
-          if [ "${{ vars.ENABLE_TERRAFORM_APPLY || 'false' }}" = "true" ]; then
-            echo "[INFO] ENABLE_TERRAFORM_APPLY is enabled. Applying verified immutable plan..."
-            terraform apply -no-color -auto-approve tfplan
-          else
-            echo "[INFO] Running in Zero-Cost Verification Mode (FNC 2026 Academic Scope: no cloud costs incurred)."
-            echo "[INFO] Demonstrating production command: terraform apply -no-color -auto-approve tfplan"
-            cat tfplan.txt
-            echo "[SUCCESS] Verified immutable plan for prod passed manual review and apply verification successfully."
-          fi
+          echo "[INFO] Immutable plan artifact verified and locked."
+          echo "[INFO] Running in Zero-Apply Verification Mode (Zero-Apply Mandate: no cloud mutations or costs incurred)."
+          cat tfplan.txt
+          echo "[SUCCESS] Verified immutable plan for prod passed manual review and zero-apply verification successfully."

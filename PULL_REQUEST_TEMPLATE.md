@@ -30,9 +30,9 @@
 ## Verification & Testing
 <!-- How were these changes verified? -->
 - [ ] Pytest suite executed successfully for automation scripts
-- [ ] Draw.io XML lint passed via diagram_agent_helper.py
-- [ ] Documentation and zero-emoji policy verified via docs_helper.py
-- [ ] Git commit messages and branch validated via git_helper.py
+- [ ] Draw.io XML lint passed via `diagram_agent_helper.py`
+- [ ] Documentation and zero-emoji policy verified via `validate_doc.py`
+- [ ] IaC rules verified via `validate_iac_rules.py`
 - [ ] Telemetry / Network CIDR non-overlap verified
 - [ ] Privacy constraints verified (no caficultor cedula exposed to public endpoints)
 - [ ] Infracost FinOps monthly impact reviewed
